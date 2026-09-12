@@ -591,7 +591,7 @@ function nestingDepths(mesh, comp, ncomp, closed) {
   if (nClosed < 2) return depth;
   const nf = mesh.nf, F = mesh.F, V = mesh.V, dead = mesh.dead;
   const NP = 10;
-  const ext = new Float64Array(ncomp * 6), tp = new Float64Array(ncomp * NP * 3), tpSet = new Uint8Array(ncomp * NP);
+  const ext = new Float64Array(ncomp * 6), tp = new Float64Array(ncomp * NP * 3), tpSet = new Uint8Array(ncomp * NP), extV = new Int32Array(ncomp * 6).fill(-1);
   for (let c = 0; c < ncomp; c++) for (let k = 0; k < 3; k++) { ext[c * 6 + k] = Infinity; ext[c * 6 + 3 + k] = -Infinity; }
   const fcount = new Int32Array(ncomp), fseen = new Int32Array(ncomp);
   let ymin = Infinity, ymax = -Infinity, zmin = Infinity, zmax = -Infinity, nCF = 0;
@@ -602,10 +602,11 @@ function nestingDepths(mesh, comp, ncomp, closed) {
     for (let q = 0; q < 4; q++) if (seen === Math.floor(q * fcount[c] / 4)) { const v = F[f * 3] * 3; const o = (c * NP + 6 + q) * 3; tp[o] = V[v]; tp[o + 1] = V[v + 1]; tp[o + 2] = V[v + 2]; tpSet[c * NP + 6 + q] = 1; }
     for (let k = 0; k < 3; k++) {
       const v = F[f * 3 + k] * 3, x = V[v], y = V[v + 1], z = V[v + 2];
+      const vi = F[f * 3 + k];
       for (let ax = 0; ax < 3; ax++) {
         const val = V[v + ax];
-        if (val < ext[c * 6 + ax]) { ext[c * 6 + ax] = val; const o = (c * NP + ax) * 3; tp[o] = x; tp[o + 1] = y; tp[o + 2] = z; tpSet[c * NP + ax] = 1; }
-        if (val > ext[c * 6 + 3 + ax]) { ext[c * 6 + 3 + ax] = val; const o = (c * NP + 3 + ax) * 3; tp[o] = x; tp[o + 1] = y; tp[o + 2] = z; tpSet[c * NP + 3 + ax] = 1; }
+        if (val < ext[c * 6 + ax] || (val === ext[c * 6 + ax] && vi < extV[c * 6 + ax])) { ext[c * 6 + ax] = val; extV[c * 6 + ax] = vi; const o = (c * NP + ax) * 3; tp[o] = x; tp[o + 1] = y; tp[o + 2] = z; tpSet[c * NP + ax] = 1; }
+        if (val > ext[c * 6 + 3 + ax] || (val === ext[c * 6 + 3 + ax] && vi < extV[c * 6 + 3 + ax])) { ext[c * 6 + 3 + ax] = val; extV[c * 6 + 3 + ax] = vi; const o = (c * NP + 3 + ax) * 3; tp[o] = x; tp[o + 1] = y; tp[o + 2] = z; tpSet[c * NP + 3 + ax] = 1; }
       }
       if (y < ymin) ymin = y; if (y > ymax) ymax = y; if (z < zmin) zmin = z; if (z > zmax) zmax = z;
     }
@@ -1608,23 +1609,12 @@ function repair(parsed, options, progress) {
     }
     // 7c. thin slivers left by stitching and filling
     {
-      const r = removeSlivers(mesh, degTol, diag, 6);
+      const r = removeSlivers(mesh, degTol, diag, 12);
       if (r.flips || r.collapses) { totals.sliverFlips += r.flips; totals.sliverCollapses += r.collapses; rebuild(); const dup = findDuplicates(mesh, false, topo); if (dup.remove.length) { for (const f of dup.remove) mesh.killFace(f); totals.duplicates += dup.count; rebuild(); } }
     }
     prog('Verifying', base + step * 0.9);
     cur = analyze(mesh, topo, Object.assign({ quick: true }, ctx));
     if (opts.trace) opts.trace.push(`iter ${iter}: naked=${cur.nakedEdges} nm=${cur.nonManifoldEdges} holes=${cur.planarHoles + cur.nonPlanarHoles} inv=${cur.invertedNormals} dup=${cur.duplicateFaces} deg=${cur.degenerateFaces} shells=${cur.shells} conflicts=${cur.orientationConflicts} T=${mesh.alive()} | needles=${totals.needles} caps=${totals.caps} dup=${totals.duplicates}/${totals.cancelled} fins=${totals.fins} split=${totals.splitVerts} tj=${totals.tjunctions} holes=${totals.holes} flipped=${totals.flipped}`);
-  }
-  // 8. global orientation with cavities
-  prog('Orienting shells', 0.84);
-  {
-    const comps = faceComponents(mesh, topo.opp);
-    const { flip } = orientationFlips(mesh, topo.opp);
-    const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, flip, ctx.storedNormals, !opts.cavities);
-    const n = applyFlips(mesh, flip, co.compFlip, comps.comp);
-    if (n) { totals.flipped += n; rebuild(); }
-    let cav = 0; for (let c = 0; c < comps.count; c++) if (co.closed[c] && (co.depth[c] & 1)) cav++;
-    if (cav) say(`${cav} inner shell${cav > 1 ? 's' : ''} kept as cavit${cav > 1 ? 'ies' : 'y'} (normals pointing inward)`);
   }
   // 9. shell cleanup
   prog('Cleaning shells', 0.9);
@@ -1650,6 +1640,18 @@ function repair(parsed, options, progress) {
       for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f] && kill[comps.comp[f]]) { mesh.killFace(f); rf++; }
       totals.zeroShells = zero; totals.smallShells = small; totals.removedShellFaces = rf; rebuild();
     }
+  }
+  // 8. global orientation with cavities
+  prog('Orienting shells', 0.84);
+  {
+    const comps = faceComponents(mesh, topo.opp);
+    const { flip } = orientationFlips(mesh, topo.opp);
+    const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, flip, ctx.storedNormals, !opts.cavities);
+    if (opts.trace) { const fd = new Int32Array(mesh.nf), ff = new Int8Array(mesh.nf), fv = new Float64Array(mesh.nf); for (let f = 0; f < mesh.nf; f++) { const c = comps.comp[f]; if (c >= 0) { fd[f] = co.depth[c]; ff[f] = co.compFlip[c] * 2 + flip[f]; fv[f] = co.vol[c] / 6; } } api._orientFaceDepth = fd; api._orientFaceFlip = ff; api._orientFaceVol = fv; api._orientNf = mesh.nf; }
+    const n = applyFlips(mesh, flip, co.compFlip, comps.comp);
+    if (n) { totals.flipped += n; rebuild(); }
+    let cav = 0; for (let c = 0; c < comps.count; c++) if (co.closed[c] && (co.depth[c] & 1)) cav++;
+    if (cav) say(`${cav} inner shell${cav > 1 ? 's' : ''} kept as cavit${cav > 1 ? 'ies' : 'y'} (normals pointing inward)`);
   }
   mesh.removeUnusedVertices();
   rebuild();
@@ -1729,8 +1731,11 @@ function minAltitude(V, a, b, c) {
    where it can improve the shape), or collapse a very short edge when no face folds. */
 function removeSlivers(mesh, degTol, diag, maxRounds) {
   let flips = 0, collapses = 0;
+  const why = { noNeighbour: 0, edgeExists: 0, noImprove: 0, tooLong: 0, link: 0, fold: 0, touched: 0, rounds: 0, capsSeen: 0 };
+  api._sliverWhy = why;
   const collapseTol = Math.max(degTol * 4, 1e-3 * diag);   // a collapse moves one vertex by at most this much
-  const gentleTol = Math.max(degTol * 4, 1e-4 * diag);
+  const gentleTol = Math.max(degTol * 4, 1e-4 * diag);      // above this, neighbours must keep their normals closely
+  const microTol = Math.max(degTol * 4, 2e-5 * diag);       // below this, the move is invisible: only topology is checked
   const nrm = [0, 0, 0];
   for (let round = 0; round < maxRounds; round++) {
     mesh.compact();
@@ -1740,7 +1745,7 @@ function removeSlivers(mesh, degTol, diag, maxRounds) {
     if (dg.needles.length) { collapseNeedles(mesh, dg.needles); collapses += dg.needles.length / 3; continue; }
     const F = mesh.F, V = mesh.V;
     const touched = new Uint8Array(mesh.nf);
-    let progress = 0;
+    let progress = 0; why.rounds++; why.capsSeen += dg.caps.length / 2;
     const adj = vertexFaces(mesh);
     const faceNormal = (f, out) => faceNormalInto(V, F, f, out);
     for (let i = 0; i < dg.caps.length; i += 2) {
@@ -1748,27 +1753,32 @@ function removeSlivers(mesh, degTol, diag, maxRounds) {
       if (mesh.dead[f] || touched[f]) continue;
       const a = F[f * 3 + k], b = F[f * 3 + (k === 2 ? 0 : k + 1)], c = F[f * 3 + (k === 0 ? 2 : k - 1)];
       const h0 = minAltitude(V, a, b, c);
-      const s = f * 3 + k, o = topo.opp[s];
       let done = false;
-      if (o >= 0) {
+      // try flipping each edge of the sliver into its neighbour, long edge first
+      for (let q = 0; q < 3 && !done; q++) {
+        const kk = (k + q) % 3;
+        const s = f * 3 + kk, o = topo.opp[s];
+        if (o < 0) { why.noNeighbour++; continue; }
         const g = (o / 3) | 0, ok2 = o % 3;
-        if (!mesh.dead[g] && !touched[g]) {
-          const d = F[g * 3 + (ok2 === 0 ? 2 : ok2 - 1)];
-          if (d !== c && topo.findEdge(c, d) < 0) {
-            const h1 = minAltitude(V, b, c, d), h2 = minAltitude(V, c, a, d);
-            const hm = Math.min(h1, h2);
-            if (hm >= degTol || hm > 2 * h0) {
-              touched[f] = 1; touched[g] = 1; mesh.killFace(f); splitFaceEdge(mesh, g, ok2, [c]); flips++; progress++; done = true;
-            }
-          }
-        }
+        if (mesh.dead[g] || touched[g]) { why.touched++; continue; }
+        const ea = F[s], eb = F[f * 3 + (kk === 2 ? 0 : kk + 1)], ec = F[f * 3 + (kk === 0 ? 2 : kk - 1)];
+        const d = F[g * 3 + (ok2 === 0 ? 2 : ok2 - 1)];
+        if (d === ec || topo.findEdge(ec, d) >= 0) { why.edgeExists++; continue; }
+        const h1 = minAltitude(V, eb, ec, d), h2 = minAltitude(V, ec, ea, d);
+        const hm = Math.min(h1, h2);
+        if (hm >= degTol || hm > 2 * h0) {
+          touched[f] = 1; touched[g] = 1; mesh.killFace(f); splitFaceEdge(mesh, g, ok2, [ec]); flips++; progress++; done = true;
+        } else why.noImprove++;
       }
       if (done) continue;
-      // collapse the shorter of the apex edges if it is tiny and no neighbour folds
+      // collapse the apex onto the nearer base end (or the other one) if the move is small and nothing folds
       const lac = Math.hypot(V[c * 3] - V[a * 3], V[c * 3 + 1] - V[a * 3 + 1], V[c * 3 + 2] - V[a * 3 + 2]);
       const lcb = Math.hypot(V[c * 3] - V[b * 3], V[c * 3 + 1] - V[b * 3 + 1], V[c * 3 + 2] - V[b * 3 + 2]);
-      const w = lac < lcb ? a : b, L = Math.min(lac, lcb);
-      if (L >= collapseTol) continue;
+      const order = lac < lcb ? [[a, lac], [b, lcb]] : [[b, lcb], [a, lac]];
+      let collapsed = false;
+      for (const [w, L] of order) {
+      if (collapsed) break;
+      if (L >= collapseTol) { why.tooLong++; continue; }
       let ok = true; const before = [0, 0, 0];
       // link condition: the only vertices adjacent to both c and w may be the apexes of the faces on edge (c,w)
       {
@@ -1776,9 +1786,10 @@ function removeSlivers(mesh, degTol, diag, maxRounds) {
         for (let j = adj.start[c]; j < adj.start[c + 1]; j++) { const g = adj.items[j]; if (mesh.dead[g]) continue; const g0 = F[g * 3], g1 = F[g * 3 + 1], g2 = F[g * 3 + 2]; const hasW = g0 === w || g1 === w || g2 === w; for (const x of [g0, g1, g2]) { if (x === c || x === w) continue; if (hasW) apex.add(x); else nbC.add(x); } }
         for (const x of nbC) if (!apex.has(x) && topo.findEdge(w, x) >= 0) { ok = false; break; }
       }
-      if (!ok) continue;
+      if (!ok) { why.link++; continue; }
       for (let j = adj.start[c]; j < adj.start[c + 1] && ok; j++) {
         const g = adj.items[j]; if (mesh.dead[g] || touched[g]) { if (touched[g]) ok = false; continue; }
+        if (L < microTol) continue; // invisible move: topology (link condition) is all that matters
         const g0 = F[g * 3], g1 = F[g * 3 + 1], g2 = F[g * 3 + 2];
         if (g0 === w || g1 === w || g2 === w) continue; // dies with the collapse
         if (minAltitude(V, g0, g1, g2) < 4 * degTol) continue; // itself a sliver: no reliable normal to compare
@@ -1791,14 +1802,15 @@ function removeSlivers(mesh, degTol, diag, maxRounds) {
         const nl = Math.hypot(nx, ny, nz);
         if (nl > 0 && (nx * before[0] + ny * before[1] + nz * before[2]) / nl < (L > gentleTol ? 0.7 : 0.2)) ok = false;
       }
-      if (!ok) continue;
+      if (!ok) { why.fold++; continue; }
       for (let j = adj.start[c]; j < adj.start[c + 1]; j++) {
         const g = adj.items[j]; if (mesh.dead[g]) continue;
         for (let q = 0; q < 3; q++) if (F[g * 3 + q] === c) F[g * 3 + q] = w;
         touched[g] = 1;
         if (F[g * 3] === F[g * 3 + 1] || F[g * 3 + 1] === F[g * 3 + 2] || F[g * 3] === F[g * 3 + 2]) mesh.killFace(g);
       }
-      collapses++; progress++;
+      collapses++; progress++; collapsed = true;
+      }
     }
     if (!progress) break;
   }

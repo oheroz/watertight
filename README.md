@@ -49,14 +49,32 @@ step, offered when the normal repair leaves something behind.
 
 ## Results on real files
 
-Tested on 126 STL files from the wild (game assets, scans, CAD exports, AI
-generated meshes, 4 KB to 97 MB, up to 1.9 million triangles). After repair
-every file is watertight and manifold with consistent normals. What can remain
-is a handful of hairline sliver triangles thinner than float32 precision, and
-self-intersections, which the solid rebuild removes.
+Tested on 126 STL files from the wild: game assets, scans, CAD exports and AI
+generated meshes, 4 KB to 97 MB, up to 1.9 million triangles, 20.7 million
+triangles in total. The whole corpus repairs in about 2.5 minutes on a laptop.
 
-The same files through formware.co's online repair, where a fixed copy was
-available, still had non-manifold edges or hundreds of degenerate faces.
+| | Before | After |
+| --- | ---: | ---: |
+| Naked edges | 436,632 | 0 |
+| Non-manifold edges | 328,790 | 0 |
+| Inverted faces | 570,634 | 0 |
+| Duplicate faces | 210,786 | 0 |
+| Degenerate faces | 32,932 | 5 |
+| Holes | 30,640 | 0 |
+| Files watertight and manifold | 51 of 126 | 126 of 126 |
+
+The five remaining triangles are hairline slivers thinner than float32
+precision on four files, each with intact manifold topology; the report lists
+them. Self-intersections are reported separately and removed by the solid
+rebuild.
+
+For comparison, the fixed copies produced by formware.co's online repair for
+three of these files still contained non-manifold edges and hundreds of
+degenerate faces.
+
+To run the corpus yourself: `python tests/make_corpus.py <folder with STL
+files>` copies the files into `tests/corpus/` and writes `tests/corpus.json`,
+then open `tests/corpus.html?base=./` from the dev server.
 
 ## Project layout
 

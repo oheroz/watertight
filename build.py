@@ -2,6 +2,7 @@
 
   dist/stl-repair.html  - complete standalone page (double-click to run offline)
   dist/artifact.html    - same page as a fragment for publishing as a claude.ai Artifact
+  docs/index.html       - copy of the standalone page for GitHub Pages
 """
 import re, pathlib, datetime
 
@@ -31,6 +32,9 @@ bundled = bundled.replace('<title>Watertight</title>', '<title>Watertight</title
 
 full = re.sub(r'<!--BEGIN-DOC-->|<!--END-DOC-->', '', bundled)
 (DIST / 'stl-repair.html').write_text(full, encoding='utf-8')
+# GitHub Pages serves docs/ from the main branch: same file, published at the project's Pages URL
+DOCS = ROOT / 'docs'; DOCS.mkdir(exist_ok=True)
+(DOCS / 'index.html').write_text(full, encoding='utf-8')
 
 fragment = re.sub(r'<!--BEGIN-DOC-->.*?<!--END-DOC-->', '', bundled, flags=re.S)
 (DIST / 'artifact.html').write_text(fragment.strip() + '\n', encoding='utf-8')

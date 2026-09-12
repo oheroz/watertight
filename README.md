@@ -11,9 +11,14 @@ overlapping parts) it can rebuild the model as one solid.
 
 ## Get it
 
-Download `dist/stl-repair.html` and open it in any modern browser
-(Chrome, Edge, Firefox, Safari). Double-clicking the file works; no server, no
-install, no internet connection needed after the download.
+- **Use it online:** https://oheroz.github.io/watertight/ (the same single
+  file served by GitHub Pages; nothing is uploaded, everything runs in your
+  browser).
+- **Download for offline use:** [stl-repair.html from the latest
+  release](https://github.com/oheroz/watertight/releases/latest/download/stl-repair.html),
+  or `dist/stl-repair.html` in this repository. Open it in any modern browser
+  (Chrome, Edge, Firefox, Safari); double-clicking the file works, no install,
+  no internet connection needed after the download.
 
 Drop one or more `.stl` files on the page. Each repaired file downloads as
 `<name>_fixed.stl`, with a plain-text report next to it. Several files can be
@@ -83,7 +88,7 @@ src/engine.js   mesh repair engine (pure JS: browser, Web Worker or Node)
 src/viewer.js   dependency-free WebGL viewer with problem overlays
 src/app.js      UI: intake, worker, console report, downloads
 src/index.html  page and styles
-build.py        bundles src/ into dist/stl-repair.html (standalone) and dist/artifact.html
+build.py        bundles src/ into dist/stl-repair.html (standalone), docs/index.html (GitHub Pages) and dist/artifact.html
 tests/run.html  regression cases (synthetic defects plus real files in tests/data)
 tests/corpus.html  batch run over a folder of STL files, tallies leftovers per file
 ```

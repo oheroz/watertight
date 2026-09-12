@@ -1,0 +1,3 @@
+tests/corpus/
+tests/data/*.stl
+tests/corpus.json

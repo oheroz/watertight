@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>corpus run</title>
+<style>body{font:12px/1.35 monospace;padding:10px;white-space:pre-wrap} .bad{color:#c00;font-weight:bold} .ok{color:#080}</style>
+</head><body><div id="out"></div>
+<script>document.write('<script src="../src/engine.js?ts=' + Date.now() + '"><\/script>')</script>
+<script>
+const E = STLRepair, out = document.getElementById('out');
+const R = window.__corpus = { done: false, rows: [], errors: [] };
+const line = (s, cls) => { const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = s; out.appendChild(d); };
+const q = new URLSearchParams(location.search);
+const base = q.get('base') || 'http://127.0.0.1:8772/';
+const only = q.get('only'); const skipBig = parseInt(q.get('max') || '0', 10);
+const opts = JSON.parse(q.get('opts') || '{}');
+(async () => {
+  const list = await (await fetch('corpus.json')).json();
+  for (const f of list) {
+    if (only && !f.path.toLowerCase().includes(only.toLowerCase())) continue;
+    if (skipBig && f.size > skipBig) continue;
+    if (/_fixed\.stl$/i.test(f.path)) continue;
+    const t0 = performance.now();
+    let row = { path: f.path, size: f.size };
+    try {
+      const buf = await (await fetch(base + f.path.split('/').map(encodeURIComponent).join('/'))).arrayBuffer();
+      const parsed = E.parseSTL(buf, f.path);
+      const r = E.repair(parsed, Object.assign({ trace: [] }, opts));
+      const b = r.before, a = r.after;
+      const pick = (x) => ({ naked: x.nakedEdges, nm: x.nonManifoldEdges, holes: x.planarHoles + x.nonPlanarHoles, inv: x.invertedNormals, dup: x.duplicateFaces, deg: x.degenerateFaces, shells: x.shells, conf: x.orientationConflicts, wt: x.stats.watertight, T: x.stats.triangles, vol: x.stats.volume });
+      row = Object.assign(row, { format: parsed.format, tris: parsed.count, ms: Math.round(r.ms), iters: r.iterations, before: pick(b), after: pick(a), log: r.log.map((l) => l.t), leftover: a.nakedEdges + a.nonManifoldEdges + a.invertedNormals + a.duplicateFaces + a.degenerateFaces + a.orientationConflicts });
+      const cls = row.leftover === 0 ? 'ok' : 'bad';
+      line(`${row.leftover === 0 ? 'CLEAN' : 'LEFT ' + row.leftover}  ${f.path}  ${parsed.count} tris  ${row.ms} ms  before[n${b.nakedEdges} nm${b.nonManifoldEdges} h${b.planarHoles + b.nonPlanarHoles} i${b.invertedNormals} d${b.duplicateFaces} g${b.degenerateFaces} s${b.shells}]  after[n${a.nakedEdges} nm${a.nonManifoldEdges} h${a.planarHoles + a.nonPlanarHoles} i${a.invertedNormals} d${a.duplicateFaces} g${a.degenerateFaces} s${a.shells} c${a.orientationConflicts}]`, cls);
+    } catch (e) {
+      row.error = String(e && e.message || e); row.stack = e && e.stack; R.errors.push(row);
+      line(`ERROR  ${f.path}  ${row.error}`, 'bad');
+    }
+    row.total = Math.round(performance.now() - t0);
+    R.rows.push(row);
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  R.done = true; line('DONE ' + R.rows.length + ' files');
+})();
+</script></body></html>

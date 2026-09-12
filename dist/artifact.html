@@ -1,0 +1,2754 @@
+<title>Watertight</title>
+<!-- Watertight STL repair, built 2026-09-12. Single file, no dependencies, runs offline. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f1f2ef; --surface: #ffffff; --surface-2: #f7f8f5; --ink: #171a1f; --muted: #5f6873; --line: #d8dbd4; --line-strong: #b8bdb5;
+  --accent: #2b5fd9; --accent-ink: #ffffff; --accent-soft: #e4ebfb;
+  --ok: #1f9d55; --warn: #c97a12; --bad: #d64531;
+  --console-bg: #111417; --console-ink: #d9dfe5; --console-dim: #8792a0; --console-ok: #4ade80; --console-bad: #ff6b5b; --console-warn: #f5b74a;
+  --sw-naked: #ff3b2f; --sw-nm: #e23bff; --sw-inv: #f0a41b; --sw-deg: #ffd21f; --sw-fill: #3ec46d; --sw-back: #e2604a; --sw-selfx: #22c7e6;
+  --font-display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 6px; --shadow: 0 1px 2px rgba(20, 24, 30, .06), 0 6px 20px -12px rgba(20, 24, 30, .25);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1114; --surface: #161a1f; --surface-2: #1b2026; --ink: #e6e9ed; --muted: #8c96a3; --line: #262c34; --line-strong: #3a424c;
+    --accent: #6d8fff; --accent-ink: #0b1220; --accent-soft: #1d2740;
+    --ok: #3ccf72; --warn: #f0a82e; --bad: #ff6b5b;
+    --console-bg: #0a0c0f; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1114; --surface: #161a1f; --surface-2: #1b2026; --ink: #e6e9ed; --muted: #8c96a3; --line: #262c34; --line-strong: #3a424c;
+  --accent: #6d8fff; --accent-ink: #0b1220; --accent-soft: #1d2740;
+  --ok: #3ccf72; --warn: #f0a82e; --bad: #ff6b5b;
+  --console-bg: #0a0c0f; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, .q:focus-visible, .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+.app { display: grid; grid-template-columns: 340px minmax(0, 1fr); min-height: 100vh; }
+@media (max-width: 960px) { .app { grid-template-columns: 1fr; } }
+
+/* ---- rail ---- */
+.rail { border-right: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; gap: 18px; padding: 22px 20px 26px; }
+@media (max-width: 960px) { .rail { border-right: 0; border-bottom: 1px solid var(--line); } }
+.brand h1 { font-size: 30px; font-weight: 700; letter-spacing: .01em; line-height: 1; }
+.brand h1 small { display: block; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.brand p { margin: 8px 0 0; color: var(--muted); font-size: 14px; max-width: 32ch; }
+.drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; padding: 26px 16px; border: 1.5px dashed var(--line-strong); border-radius: var(--radius); background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s; position: relative; }
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.drop strong { font-family: var(--font-display); font-size: 19px; font-weight: 600; }
+.drop span { color: var(--muted); font-size: 13px; }
+.drop .btnlike { margin-top: 8px; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); }
+.jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.jobs:empty { display: none; }
+.job { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius); border: 1px solid transparent; cursor: pointer; font-size: 14px; }
+.job:hover { background: var(--surface-2); }
+.job.sel { border-color: var(--line); background: var(--surface-2); }
+.job .jn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.job .jm { color: var(--muted); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chip { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.chip.run { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.batch { display: flex; gap: 8px; }
+.btn { padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface); font-weight: 500; font-size: 14px; }
+.btn:hover { background: var(--surface-2); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.07); background: var(--accent); }
+.btn.sm { padding: 5px 10px; font-size: 13px; }
+.opts summary { cursor: pointer; font-family: var(--font-display); font-weight: 600; font-size: 16px; padding: 4px 0; list-style: none; display: flex; align-items: center; gap: 8px; }
+.opts summary::before { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-left: 2px; }
+.opts[open] summary::before { transform: rotate(45deg); }
+.opts .grid { display: grid; grid-template-columns: 1fr auto; gap: 9px 12px; align-items: center; margin-top: 10px; font-size: 14px; }
+.opts label { display: contents; }
+.opts label > span { color: var(--ink); }
+.opts label > span small { display: block; color: var(--muted); font-size: 12px; }
+.opts select, .opts input[type=number] { padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); width: 108px; }
+.opts input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; justify-self: end; }
+.rail footer { margin-top: auto; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.rail footer a { color: var(--accent); }
+
+/* ---- stage ---- */
+.stage { padding: 22px 26px 30px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.jobhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.jobhead h2 { font-size: 24px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pill { font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; color: var(--muted); border: 1px solid var(--line-strong); }
+.pill.ok { color: var(--ok); border-color: var(--ok); }
+.pill.warn { color: var(--warn); border-color: var(--warn); }
+.pill.bad { color: var(--bad); border-color: var(--bad); }
+.pill.run { color: var(--accent); border-color: var(--accent); }
+.meta { color: var(--muted); font-size: 13.5px; }
+.jobhead .spacer { flex: 1; }
+.panes { display: grid; grid-template-columns: minmax(360px, 5fr) minmax(320px, 6fr); gap: 16px; align-items: stretch; }
+@media (max-width: 1180px) { .panes { grid-template-columns: 1fr; } }
+.console-wrap { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.console { margin: 0; background: var(--console-bg); color: var(--console-ink); font-family: var(--font-mono); font-size: 13.5px; line-height: 1.55; padding: 16px 18px; border-radius: var(--radius); box-shadow: var(--shadow); min-height: 420px; max-height: 620px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.console .ln { display: block; }
+.console .head { color: #ffffff; }
+.console .warn { color: var(--console-warn); }
+.console .bad { color: var(--console-bad); }
+.console b { font-weight: 600; }
+.console b.ok { color: var(--console-ok); } .console b.bad { color: var(--console-bad); } .console b.warn { color: var(--console-warn); }
+.console .q { color: var(--console-dim); cursor: help; position: relative; }
+.console .q:hover::after, .console .q:focus::after { content: attr(data-tip); position: absolute; left: 0; top: 1.6em; z-index: 5; width: 300px; max-width: 70vw; background: #1e242b; color: #e5eaf0; border: 1px solid #333c47; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; line-height: 1.4; white-space: normal; font-family: var(--font-body); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.console .bar { height: 6px; background: #22282f; border-radius: 3px; margin-top: 10px; overflow: hidden; }
+.console .bar i { display: block; height: 100%; background: var(--console-ok); transition: width .25s; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.actions .note { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+.viewer-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vtools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13.5px; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
+.seg button { padding: 5px 12px; border: 0; background: transparent; color: var(--muted); font-weight: 500; }
+.seg button.on { background: var(--ink); color: var(--bg); }
+.vtools label { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.vtools input { accent-color: var(--accent); margin: 0; }
+.vtools .fit { margin-left: auto; }
+.canvas-box { position: relative; background: linear-gradient(180deg, var(--surface-2), var(--surface)); border: 1px solid var(--line); border-radius: var(--radius); min-height: 420px; overflow: hidden; }
+.canvas-box canvas { display: block; width: 100%; height: 100%; position: absolute; inset: 0; touch-action: none; }
+.canvas-box .hint { position: absolute; left: 10px; bottom: 8px; font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); pointer-events: none; }
+.nogl canvas { display: none; }
+.nogl #glMsg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 20px; text-align: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.sw.naked { background: var(--sw-naked); } .sw.nm { background: var(--sw-nm); } .sw.inv { background: var(--sw-inv); } .sw.deg { background: var(--sw-deg); } .sw.fill { background: var(--sw-fill); } .sw.back { background: var(--sw-back); } .sw.selfx { background: var(--sw-selfx); }
+.stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1180px) { .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stats:empty { display: none; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stat .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-family: var(--font-display); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .s { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage.empty .jobhead, .stage.empty .panes, .stage.empty .stats { display: none; }
+.stage .placeholder { display: none; color: var(--muted); }
+.stage.empty .placeholder { display: block; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 20px); opacity: 0; background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 999px; font-size: 14px; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 20; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.bad { background: var(--bad); color: #fff; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <h1><small>STL repair</small>Watertight</h1>
+      <p>Fixes STL files for 3D printing right here in your browser. No upload, no queue, no file size limit beyond your own memory.</p>
+    </div>
+    <label class="drop" id="drop">
+      <input type="file" id="file" multiple accept=".stl,model/stl,application/sla,application/octet-stream" aria-label="Choose STL files">
+      <strong>Drop .stl files here</strong>
+      <span>binary or ASCII · several at once is fine</span>
+      <span class="btnlike">Choose files</span>
+    </label>
+    <ul class="jobs" id="jobs"></ul>
+    <div class="batch" id="batch" hidden>
+      <button class="btn sm" id="dlAll">Download all (.zip)</button>
+      <button class="btn sm" id="clearBtn">Clear list</button>
+    </div>
+    <details class="opts">
+      <summary>Repair settings</summary>
+      <div class="grid">
+        <label><span>Close gaps up to<small>relative to model size, boundary vertices only</small></span>
+          <select id="optTol"><option value="off">off</option><option value="1e-6">tiny (1 ppm)</option><option value="1e-5" selected>normal (10 ppm)</option><option value="1e-4">loose (100 ppm)</option><option value="1e-3">very loose (0.1 %)</option></select></label>
+        <label><span>Fill holes</span><input type="checkbox" id="optFill" checked></label>
+        <label><span>Largest hole to fill<small>edges around the hole, 0 = no limit</small></span><input type="number" id="optMaxHole" min="0" step="1" value="0"></label>
+        <label><span>Enclosed shells become cavities<small>off: every shell faces outward</small></span><input type="checkbox" id="optCavities" checked></label>
+        <label><span>Remove zero-volume shells<small>flat double-sided sheets</small></span><input type="checkbox" id="optZero" checked></label>
+        <label><span>Remove small floating shells</span><input type="checkbox" id="optSmall"></label>
+        <label><span>Small means below<small>% of the largest shell's volume</small></span><input type="number" id="optSmallPct" min="0" step="0.1" value="0.1"></label>
+        <label><span>Rebuild as solid<small>resamples into one clean solid: no self-intersections, overlapping parts merged; corners rounded to one voxel</small></span><input type="checkbox" id="optSolid"></label>
+        <label><span>Solid resolution<small>voxels along the longest side</small></span><select id="optSolidRes"><option value="100">100 (fast)</option><option value="150">150</option><option value="200" selected>200</option><option value="250">250</option><option value="320">320 (slow, ~1 GB RAM)</option></select></label>
+        <label><span>Output format</span><select id="optFormat"><option value="binary" selected>binary STL</option><option value="ascii">ASCII STL</option></select></label>
+      </div>
+    </details>
+    <footer>
+      <span id="engineNote">Starting…</span><br>
+      Checks the same eight things the usual online fixers do, then verifies its own result. <a href="#" id="sampleBtn">Load the sample part</a> to see every defect type.
+    </footer>
+  </aside>
+  <main class="stage empty" id="stage">
+    <p class="placeholder">Drop an STL file to start.</p>
+    <div class="jobhead">
+      <h2 id="jobName">—</h2>
+      <span class="pill" id="verdict">—</span>
+      <span class="meta" id="jobMeta"></span>
+      <span class="spacer"></span>
+      <button class="btn sm" id="rerun" title="Repair again with the current settings">Re-run with current settings</button>
+    </div>
+    <section class="panes">
+      <div class="console-wrap">
+        <pre class="console" id="console" aria-live="polite"></pre>
+        <div class="actions">
+          <button class="btn primary" id="dl" disabled>Download fixed STL</button>
+          <button class="btn" id="dlReport" disabled>Save report</button>
+          <button class="btn" id="solidBtn" hidden title="Resample into one clean solid">Rebuild as solid</button>
+          <span class="note">Normals are recomputed from winding on export.</span>
+        </div>
+      </div>
+      <div class="viewer-wrap" id="viewerWrap">
+        <div class="vtools">
+          <span class="seg"><button data-view="original">Original</button><button data-view="repaired" class="on">Repaired</button></span>
+          <label><input type="checkbox" data-show="problems" checked> problems</label>
+          <label><input type="checkbox" data-show="fills" checked> fills</label>
+          <label><input type="checkbox" data-show="wire"> wireframe</label>
+          <button class="btn sm fit" id="fitBtn">Fit</button>
+        </div>
+        <div class="canvas-box">
+          <canvas id="gl"></canvas>
+          <div id="glMsg"></div>
+          <div class="hint">drag: orbit · wheel: zoom · right-drag: pan · double-click: fit</div>
+        </div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </section>
+    <section class="stats" id="stats"></section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script id="engine-src">
+/* ============================================================================
+   STL Repair Engine
+   Pure JavaScript, no DOM. Runs on the main thread, in a Web Worker, or Node.
+
+   Pipeline:  parse -> weld -> analyze -> repair passes -> verify -> export
+   Repair passes (iterated until clean or stable):
+     1. gap closing (tolerance weld of boundary vertices only)
+     2. degenerate faces (needle collapse, cap split)
+     3. duplicate faces (cancel opposite pairs, keep one otherwise)
+     4. non-manifold edges (angular pairing, fin removal, vertex splitting)
+     5. winding consistency (BFS across shared edges)
+     6. T-junction stitching
+     7. hole filling (min-weight DP / ear clipping with islands / advancing front)
+     8. global orientation with nested-shell (cavity) handling
+     9. shell cleanup (zero-volume and optionally small floating shells)
+   ============================================================================ */
+var STLRepair = (function () {
+'use strict';
+
+const FLAG_FLIPPED = 1, FLAG_FILL = 2, FLAG_SPLIT = 4;
+
+/* ------------------------------------------------------------------ utils */
+function nextPow2(n) { let p = 1; while (p < n) p *= 2; return p; }
+function mix3(a, b, c) {
+  let h = Math.imul(a ^ 0x9E3779B9, 0x85EBCA6B);
+  h = Math.imul(h ^ b ^ (h >>> 13), 0xC2B2AE35);
+  h = Math.imul(h ^ c ^ (h >>> 16), 0x27D4EB2F);
+  h ^= h >>> 15;
+  return h >>> 0;
+}
+function asciiSlice(bytes, s, e) {
+  let out = '';
+  for (let i = s; i < e; i++) out += String.fromCharCode(bytes[i]);
+  return out;
+}
+function fmtInt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+/* ------------------------------------------------------------------ parse */
+function parseSTL(buffer, name) {
+  const bytes = new Uint8Array(buffer);
+  const n = bytes.byteLength;
+  if (n < 15) throw new Error('File is too small to be an STL file.');
+  let dv = null, binCount = 0;
+  if (n >= 84) {
+    dv = new DataView(buffer);
+    binCount = dv.getUint32(80, true);
+    if (84 + binCount * 50 === n) return parseBinary(buffer, binCount);
+  }
+  const head = asciiSlice(bytes, 0, Math.min(n, 4096)).toLowerCase();
+  if (/^\s*solid/.test(head) && (head.includes('facet') || head.includes('vertex') || head.includes('endsolid'))) return parseAscii(buffer);
+  if (dv && binCount > 0 && 84 + binCount * 50 <= n) return parseBinary(buffer, binCount);
+  const more = asciiSlice(bytes, 0, Math.min(n, 65536)).toLowerCase();
+  if (more.includes('vertex')) return parseAscii(buffer);
+  throw new Error('This does not look like an STL file (no binary triangle table and no ASCII facets found).');
+}
+
+function parseBinary(buffer, count) {
+  const dv = new DataView(buffer);
+  const tris = new Float32Array(count * 9), normals = new Float32Array(count * 3);
+  let o = 84, invalid = 0;
+  for (let i = 0; i < count; i++) {
+    const t3 = i * 3, t9 = i * 9;
+    normals[t3] = dv.getFloat32(o, true); normals[t3 + 1] = dv.getFloat32(o + 4, true); normals[t3 + 2] = dv.getFloat32(o + 8, true);
+    for (let k = 0; k < 9; k++) {
+      const v = dv.getFloat32(o + 12 + k * 4, true);
+      if (v === v && v !== Infinity && v !== -Infinity) tris[t9 + k] = v; else { tris[t9 + k] = 0; invalid++; }
+    }
+    o += 50;
+  }
+  for (let i = 0; i < normals.length; i++) if (!(normals[i] === normals[i]) || Math.abs(normals[i]) === Infinity) normals[i] = 0;
+  const header = asciiSlice(new Uint8Array(buffer), 0, 80).replace(/\0+$/, '').trim();
+  return { tris, normals, count, format: 'binary', header, invalidValues: invalid };
+}
+
+function parseAscii(buffer) {
+  const text = new TextDecoder('utf-8').decode(buffer);
+  let cap = 4096, tris = new Float32Array(cap * 9), nv = 0;   // nv = vertex count
+  let ncap = 4096, normals = new Float32Array(ncap * 3), nn = 0, invalid = 0;
+  const len = text.length;
+  let p = 0;
+  // scan tokens 'vertex' and 'normal'
+  while (p < len) {
+    const iv = text.indexOf('vertex', p);
+    const inrm = text.indexOf('normal', p);
+    if (iv < 0 && inrm < 0) break;
+    let isV, at;
+    if (iv < 0) { isV = false; at = inrm + 6; } else if (inrm < 0) { isV = true; at = iv + 6; }
+    else if (iv < inrm) { isV = true; at = iv + 6; } else { isV = false; at = inrm + 6; }
+    let vals = [0, 0, 0], ok = true;
+    for (let k = 0; k < 3; k++) {
+      while (at < len) { const c = text.charCodeAt(at); if (c === 32 || c === 9 || c === 13 || c === 10) at++; else break; }
+      const st = at;
+      while (at < len) { const c = text.charCodeAt(at); if (c === 32 || c === 9 || c === 13 || c === 10) break; at++; }
+      const num = parseFloat(text.substring(st, at));
+      if (num !== num || Math.abs(num) === Infinity) { ok = false; vals[k] = 0; } else vals[k] = num;
+    }
+    if (isV) {
+      if (!ok) invalid++;
+      if ((nv + 1) * 3 > tris.length) { const t = new Float32Array(tris.length * 2); t.set(tris); tris = t; }
+      tris[nv * 3] = vals[0]; tris[nv * 3 + 1] = vals[1]; tris[nv * 3 + 2] = vals[2]; nv++;
+    } else {
+      if ((nn + 1) * 3 > normals.length) { const t = new Float32Array(normals.length * 2); t.set(normals); normals = t; }
+      normals[nn * 3] = vals[0]; normals[nn * 3 + 1] = vals[1]; normals[nn * 3 + 2] = vals[2]; nn++;
+    }
+    p = at;
+  }
+  const count = Math.floor(nv / 3);
+  const m = text.match(/^\s*solid\s*([^\r\n]*)/i);
+  return {
+    tris: tris.subarray(0, count * 9), normals: nn === count ? normals.subarray(0, count * 3) : null,
+    count, format: 'ascii', header: m ? m[1].trim() : '', invalidValues: invalid, danglingVertices: nv - count * 3,
+  };
+}
+
+/* ------------------------------------------------------------------- mesh */
+class Mesh {
+  constructor(vcap, fcap) {
+    this.V = new Float64Array(Math.max(3, vcap * 3)); this.nv = 0;
+    this.F = new Uint32Array(Math.max(3, fcap * 3)); this.nf = 0;
+    this.src = new Int32Array(Math.max(1, fcap));
+    this.flags = new Uint8Array(Math.max(1, fcap));
+    this.dead = new Uint8Array(Math.max(1, fcap)); this.ndead = 0;
+  }
+  addVertex(x, y, z) {
+    if ((this.nv + 1) * 3 > this.V.length) { const n = new Float64Array(this.V.length * 2); n.set(this.V); this.V = n; }
+    const i = this.nv++; this.V[i * 3] = x; this.V[i * 3 + 1] = y; this.V[i * 3 + 2] = z; return i;
+  }
+  addFace(a, b, c, src, flags) {
+    if (this.nf + 1 > this.src.length) {
+      const cap = this.src.length * 2;
+      const F = new Uint32Array(cap * 3); F.set(this.F); this.F = F;
+      const s = new Int32Array(cap); s.set(this.src); this.src = s;
+      const fl = new Uint8Array(cap); fl.set(this.flags); this.flags = fl;
+      const d = new Uint8Array(cap); d.set(this.dead); this.dead = d;
+    }
+    const f = this.nf++;
+    this.F[f * 3] = a; this.F[f * 3 + 1] = b; this.F[f * 3 + 2] = c;
+    this.src[f] = src; this.flags[f] = flags | 0; this.dead[f] = 0;
+    return f;
+  }
+  killFace(f) { if (!this.dead[f]) { this.dead[f] = 1; this.ndead++; } }
+  alive() { return this.nf - this.ndead; }
+  compact() {
+    if (!this.ndead) return;
+    const F = this.F, src = this.src, flags = this.flags, dead = this.dead;
+    let w = 0;
+    for (let f = 0; f < this.nf; f++) {
+      if (dead[f]) continue;
+      if (w !== f) { F[w * 3] = F[f * 3]; F[w * 3 + 1] = F[f * 3 + 1]; F[w * 3 + 2] = F[f * 3 + 2]; src[w] = src[f]; flags[w] = flags[f]; }
+      dead[w] = 0; w++;
+    }
+    this.nf = w; this.ndead = 0;
+  }
+  removeUnusedVertices() {
+    this.compact();
+    const used = new Uint8Array(this.nv), F = this.F;
+    for (let i = 0; i < this.nf * 3; i++) used[F[i]] = 1;
+    const remap = new Int32Array(this.nv); let w = 0; const V = this.V;
+    for (let v = 0; v < this.nv; v++) {
+      if (!used[v]) { remap[v] = -1; continue; }
+      remap[v] = w; if (w !== v) { V[w * 3] = V[v * 3]; V[w * 3 + 1] = V[v * 3 + 1]; V[w * 3 + 2] = V[v * 3 + 2]; } w++;
+    }
+    for (let i = 0; i < this.nf * 3; i++) F[i] = remap[F[i]];
+    const removed = this.nv - w; this.nv = w; return removed;
+  }
+  snapshot() {
+    this.compact();
+    return { V: this.V.slice(0, this.nv * 3), F: this.F.slice(0, this.nf * 3), flags: this.flags.slice(0, this.nf), src: this.src.slice(0, this.nf), nv: this.nv, nf: this.nf };
+  }
+}
+
+/* exact welding of raw triangle soup into an indexed mesh */
+function weldExact(tris, count) {
+  const nref = count * 3;
+  for (let i = 0; i < tris.length; i++) if (tris[i] === 0) tris[i] = 0; // normalize -0
+  const size = nextPow2(Math.max(16, nref * 2)), mask = size - 1;
+  const table = new Int32Array(size).fill(-1);
+  const bits = new Uint32Array(tris.buffer, tris.byteOffset, tris.length);
+  const mesh = new Mesh(Math.max(4, Math.ceil(nref / 2)), Math.max(4, count));
+  const V = [];
+  let Vf = new Float64Array(Math.max(3, nref)); let nv = 0;  // grow on demand
+  const F = new Uint32Array(nref);
+  for (let r = 0; r < nref; r++) {
+    const x = tris[r * 3], y = tris[r * 3 + 1], z = tris[r * 3 + 2];
+    let h = mix3(bits[r * 3], bits[r * 3 + 1], bits[r * 3 + 2]) & mask;
+    let found = -1;
+    while (true) {
+      const t = table[h];
+      if (t < 0) break;
+      if (Vf[t * 3] === x && Vf[t * 3 + 1] === y && Vf[t * 3 + 2] === z) { found = t; break; }
+      h = (h + 1) & mask;
+    }
+    if (found < 0) {
+      if ((nv + 1) * 3 > Vf.length) { const n = new Float64Array(Vf.length * 2); n.set(Vf); Vf = n; }
+      found = nv++; Vf[found * 3] = x; Vf[found * 3 + 1] = y; Vf[found * 3 + 2] = z; table[h] = found;
+    }
+    F[r] = found;
+  }
+  mesh.V = Vf.length === nv * 3 ? Vf : Vf.slice(0, Math.max(3, nv * 3)); mesh.nv = nv;
+  mesh.F = F; mesh.nf = count;
+  mesh.src = new Int32Array(Math.max(1, count)); for (let f = 0; f < count; f++) mesh.src[f] = f;
+  mesh.flags = new Uint8Array(Math.max(1, count)); mesh.dead = new Uint8Array(Math.max(1, count)); mesh.ndead = 0;
+  return mesh;
+}
+
+/* tolerance welding of a subset of vertices; returns number of merged vertices */
+function weldTolerance(mesh, verts, tol) {
+  const nvs = verts.length; if (nvs < 2 || !(tol > 0)) return 0;
+  const V = mesh.V;
+  const size = nextPow2(Math.max(16, nvs * 2)), mask = size - 1;
+  const table = new Int32Array(size).fill(-1);     // cell -> first entry
+  const eNext = new Int32Array(nvs).fill(-1), eCx = new Int32Array(nvs), eCy = new Int32Array(nvs), eCz = new Int32Array(nvs);
+  const inv = 1 / tol;
+  for (let i = 0; i < nvs; i++) {
+    const v = verts[i];
+    const cx = Math.floor(V[v * 3] * inv), cy = Math.floor(V[v * 3 + 1] * inv), cz = Math.floor(V[v * 3 + 2] * inv);
+    eCx[i] = cx; eCy[i] = cy; eCz[i] = cz;
+    let h = mix3(cx | 0, cy | 0, cz | 0) & mask;
+    // find bucket for exact cell; buckets chain entries of the same cell
+    while (true) {
+      const t = table[h];
+      if (t < 0) { table[h] = i; break; }
+      if (eCx[t] === cx && eCy[t] === cy && eCz[t] === cz) { eNext[i] = eNext[t]; eNext[t] = i; break; }
+      h = (h + 1) & mask;
+    }
+  }
+  const parent = new Int32Array(mesh.nv); for (let i = 0; i < mesh.nv; i++) parent[i] = i;
+  const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  const tol2 = tol * tol; let merged = 0;
+  for (let i = 0; i < nvs; i++) {
+    const v = verts[i]; const x = V[v * 3], y = V[v * 3 + 1], z = V[v * 3 + 2];
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const cx = eCx[i] + dx, cy = eCy[i] + dy, cz = eCz[i] + dz;
+      let h = mix3(cx | 0, cy | 0, cz | 0) & mask;
+      let head = -1;
+      while (true) { const t = table[h]; if (t < 0) break; if (eCx[t] === cx && eCy[t] === cy && eCz[t] === cz) { head = t; break; } h = (h + 1) & mask; }
+      for (let t = head; t >= 0; t = eNext[t]) {
+        if (t <= i) continue;
+        const w = verts[t];
+        const ddx = V[w * 3] - x, ddy = V[w * 3 + 1] - y, ddz = V[w * 3 + 2] - z;
+        if (ddx * ddx + ddy * ddy + ddz * ddz <= tol2) {
+          const ra = find(v), rb = find(w);
+          if (ra !== rb) { parent[rb] = ra; merged++; }
+        }
+      }
+    }
+  }
+  if (merged) {
+    const F = mesh.F;
+    for (let i = 0; i < mesh.nf * 3; i++) F[i] = find(F[i]);
+  }
+  return merged;
+}
+
+/* --------------------------------------------------------------- topology */
+function buildTopology(mesh) {
+  const nf = mesh.nf, F = mesh.F, dead = mesh.dead, ns = nf * 3;
+  const size = nextPow2(Math.max(16, ns * 2)), mask = size - 1;
+  const table = new Int32Array(size).fill(-1);
+  const eLo = new Uint32Array(ns), eHi = new Uint32Array(ns), eFirst = new Int32Array(ns), eCnt = new Uint32Array(ns);
+  const sNext = new Int32Array(ns).fill(-1), sEdge = new Int32Array(ns).fill(-1);
+  let ne = 0;
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue;
+    const b0 = f * 3, v0 = F[b0], v1 = F[b0 + 1], v2 = F[b0 + 2];
+    if (v0 === v1 || v1 === v2 || v2 === v0) continue;   // degenerate by index: no topology
+    for (let k = 0; k < 3; k++) {
+      const a = F[b0 + k], b = F[b0 + (k === 2 ? 0 : k + 1)];
+      const lo = a < b ? a : b, hi = a < b ? b : a;
+      let h = mix3(lo, hi, 7) & mask, e = -1;
+      while (true) { const t = table[h]; if (t < 0) break; if (eLo[t] === lo && eHi[t] === hi) { e = t; break; } h = (h + 1) & mask; }
+      if (e < 0) { e = ne++; table[h] = e; eLo[e] = lo; eHi[e] = hi; eFirst[e] = -1; eCnt[e] = 0; }
+      const s = b0 + k; sNext[s] = eFirst[e]; eFirst[e] = s; eCnt[e]++; sEdge[s] = e;
+    }
+  }
+  const opp = new Int32Array(ns).fill(-1);
+  const nakedEdges = [], nmEdges = [];
+  for (let e = 0; e < ne; e++) {
+    const c = eCnt[e];
+    if (c === 2) { const s1 = eFirst[e], s2 = sNext[s1]; opp[s1] = s2; opp[s2] = s1; }
+    else if (c === 1) nakedEdges.push(e);
+    else nmEdges.push(e);
+  }
+  const findEdge = (a, b) => {
+    const lo = a < b ? a : b, hi = a < b ? b : a;
+    let h = mix3(lo, hi, 7) & mask;
+    while (true) { const t = table[h]; if (t < 0) return -1; if (eLo[t] === lo && eHi[t] === hi) return t; h = (h + 1) & mask; }
+  };
+  return { ne, eLo, eHi, eFirst, eCnt, sNext, sEdge, opp, nakedEdges, nmEdges, findEdge };
+}
+
+function faceComponents(mesh, opp) {
+  const nf = mesh.nf, dead = mesh.dead;
+  const parent = new Int32Array(nf); for (let i = 0; i < nf; i++) parent[i] = i;
+  const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  for (let s = 0; s < nf * 3; s++) {
+    const o = opp[s]; if (o < 0 || o < s) continue;
+    const f = (s / 3) | 0, g = (o / 3) | 0;
+    if (dead[f] || dead[g]) continue;
+    const ra = find(f), rb = find(g); if (ra !== rb) parent[rb] = ra;
+  }
+  const comp = new Int32Array(nf).fill(-1), rootId = new Int32Array(nf).fill(-1);
+  let count = 0; const sizes = []; const F = mesh.F;
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue;
+    if (F[f * 3] === F[f * 3 + 1] || F[f * 3 + 1] === F[f * 3 + 2] || F[f * 3] === F[f * 3 + 2]) continue;
+    const r = find(f);
+    if (rootId[r] < 0) { rootId[r] = count++; sizes.push(0); }
+    comp[f] = rootId[r]; sizes[comp[f]]++;
+  }
+  return { comp, count, sizes };
+}
+
+/* ----------------------------------------------------------------- geometry */
+function faceNormalInto(V, F, f, out) {
+  const a = F[f * 3] * 3, b = F[f * 3 + 1] * 3, c = F[f * 3 + 2] * 3;
+  const ux = V[b] - V[a], uy = V[b + 1] - V[a + 1], uz = V[b + 2] - V[a + 2];
+  const vx = V[c] - V[a], vy = V[c + 1] - V[a + 1], vz = V[c + 2] - V[a + 2];
+  out[0] = uy * vz - uz * vy; out[1] = uz * vx - ux * vz; out[2] = ux * vy - uy * vx;
+  const l = Math.sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+  if (l > 0) { out[0] /= l; out[1] /= l; out[2] /= l; }
+  return l * 0.5; // area
+}
+function det3(V, a, b, c) {
+  a *= 3; b *= 3; c *= 3;
+  const ax = V[a], ay = V[a + 1], az = V[a + 2], bx = V[b], by = V[b + 1], bz = V[b + 2], cx = V[c], cy = V[c + 1], cz = V[c + 2];
+  return ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+}
+function bbox(V, nv) {
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < nv; i++) for (let k = 0; k < 3; k++) { const v = V[i * 3 + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v; }
+  if (nv === 0) return { min: [0, 0, 0], max: [0, 0, 0], size: [0, 0, 0], diag: 0, center: [0, 0, 0] };
+  const size = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]];
+  return { min: mn, max: mx, size, diag: Math.hypot(size[0], size[1], size[2]), center: [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2] };
+}
+
+/* ------------------------------------------------------------ orientation */
+/* BFS across paired edges: flip[f]=1 if f must be reversed to agree with its neighbours */
+function orientationFlips(mesh, opp) {
+  const nf = mesh.nf, F = mesh.F, dead = mesh.dead;
+  const flip = new Uint8Array(nf), visited = new Uint8Array(nf);
+  const stack = new Int32Array(nf); let conflicts = 0; const conflictSlots = [];
+  for (let f0 = 0; f0 < nf; f0++) {
+    if (dead[f0] || visited[f0]) continue;
+    visited[f0] = 1; let sp = 0; stack[sp++] = f0;
+    while (sp > 0) {
+      const g = stack[--sp]; const fg = flip[g];
+      for (let k = 0; k < 3; k++) {
+        const s = g * 3 + k, o = opp[s]; if (o < 0) continue;
+        const h = (o / 3) | 0; if (dead[h]) continue;
+        const a = F[s], b = F[g * 3 + (k === 2 ? 0 : k + 1)];
+        const ok = o % 3, c = F[o], d = F[h * 3 + (ok === 2 ? 0 : ok + 1)];
+        const sameDir = (c === a && d === b) ? 1 : 0;
+        const want = fg ^ sameDir;
+        if (visited[h]) { if (flip[h] !== want) { conflicts++; conflictSlots.push(s); } continue; }
+        visited[h] = 1; flip[h] = want; stack[sp++] = h;
+      }
+    }
+  }
+  return { flip, conflicts, conflictSlots };
+}
+
+/* nesting depth of closed components via +x ray casting on a (y,z) grid.
+   A shell counts as inside another only if every one of its test points (6 extremes + 4 spread
+   vertices) is inside; points whose ray starts on the other shell's surface are ignored. */
+function nestingDepths(mesh, comp, ncomp, closed) {
+  const depth = new Int32Array(ncomp);
+  let nClosed = 0; for (let c = 0; c < ncomp; c++) if (closed[c]) nClosed++;
+  if (nClosed < 2) return depth;
+  const nf = mesh.nf, F = mesh.F, V = mesh.V, dead = mesh.dead;
+  const NP = 10;
+  const ext = new Float64Array(ncomp * 6), tp = new Float64Array(ncomp * NP * 3), tpSet = new Uint8Array(ncomp * NP);
+  for (let c = 0; c < ncomp; c++) for (let k = 0; k < 3; k++) { ext[c * 6 + k] = Infinity; ext[c * 6 + 3 + k] = -Infinity; }
+  const fcount = new Int32Array(ncomp), fseen = new Int32Array(ncomp);
+  let ymin = Infinity, ymax = -Infinity, zmin = Infinity, zmax = -Infinity, nCF = 0;
+  for (let f = 0; f < nf; f++) { if (dead[f]) continue; const c = comp[f]; if (c < 0 || !closed[c]) continue; fcount[c]++; nCF++; }
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue; const c = comp[f]; if (c < 0 || !closed[c]) continue;
+    const seen = fseen[c]++;
+    for (let q = 0; q < 4; q++) if (seen === Math.floor(q * fcount[c] / 4)) { const v = F[f * 3] * 3; const o = (c * NP + 6 + q) * 3; tp[o] = V[v]; tp[o + 1] = V[v + 1]; tp[o + 2] = V[v + 2]; tpSet[c * NP + 6 + q] = 1; }
+    for (let k = 0; k < 3; k++) {
+      const v = F[f * 3 + k] * 3, x = V[v], y = V[v + 1], z = V[v + 2];
+      for (let ax = 0; ax < 3; ax++) {
+        const val = V[v + ax];
+        if (val < ext[c * 6 + ax]) { ext[c * 6 + ax] = val; const o = (c * NP + ax) * 3; tp[o] = x; tp[o + 1] = y; tp[o + 2] = z; tpSet[c * NP + ax] = 1; }
+        if (val > ext[c * 6 + 3 + ax]) { ext[c * 6 + 3 + ax] = val; const o = (c * NP + 3 + ax) * 3; tp[o] = x; tp[o + 1] = y; tp[o + 2] = z; tpSet[c * NP + 3 + ax] = 1; }
+      }
+      if (y < ymin) ymin = y; if (y > ymax) ymax = y; if (z < zmin) zmin = z; if (z > zmax) zmax = z;
+    }
+  }
+  const res = Math.max(1, Math.min(400, Math.round(Math.sqrt(nCF / 4))));
+  const sy = (ymax - ymin) || 1, sz = (zmax - zmin) || 1;
+  const cell = (y, z) => {
+    let i = Math.floor((y - ymin) / sy * res), j = Math.floor((z - zmin) / sz * res);
+    if (i < 0) i = 0; if (i >= res) i = res - 1; if (j < 0) j = 0; if (j >= res) j = res - 1; return i * res + j;
+  };
+  const ncell = res * res;
+  const cellCount = new Int32Array(ncell + 1);
+  const fmin = new Int32Array(nf * 2), fmax = new Int32Array(nf * 2);
+  for (let f = 0; f < nf; f++) {
+    if (dead[f] || comp[f] < 0 || !closed[comp[f]]) continue;
+    let y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let k = 0; k < 3; k++) { const v = F[f * 3 + k] * 3; const y = V[v + 1], z = V[v + 2]; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+    const c0 = cell(y0, z0), c1 = cell(y1, z1);
+    const i0 = (c0 / res) | 0, j0 = c0 % res, i1 = (c1 / res) | 0, j1 = c1 % res;
+    fmin[f * 2] = i0; fmin[f * 2 + 1] = j0; fmax[f * 2] = i1; fmax[f * 2 + 1] = j1;
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) cellCount[i * res + j + 1]++;
+  }
+  for (let i = 0; i < ncell; i++) cellCount[i + 1] += cellCount[i];
+  const items = new Int32Array(cellCount[ncell]); const fill = cellCount.slice(0, ncell);
+  for (let f = 0; f < nf; f++) {
+    if (dead[f] || comp[f] < 0 || !closed[comp[f]]) continue;
+    for (let i = fmin[f * 2]; i <= fmax[f * 2]; i++) for (let j = fmin[f * 2 + 1]; j <= fmax[f * 2 + 1]; j++) items[fill[i * res + j]++] = f;
+  }
+  const hits = new Int32Array(ncomp), graze = new Uint8Array(ncomp), touched = [];
+  const insideCnt = new Int32Array(ncomp), grazeCnt = new Int32Array(ncomp), pairTouched = [];
+  const jit = 1e-7 * Math.max(sy, sz), grazeEps = 1e-6 * Math.max(sy, sz, 1e-300);
+  for (let c = 0; c < ncomp; c++) {
+    if (!closed[c]) continue;
+    let np = 0;
+    for (let q = 0; q < NP; q++) {
+      if (!tpSet[c * NP + q]) continue; np++;
+      const o = (c * NP + q) * 3;
+      const px = tp[o], py = tp[o + 1] + jit * 1.7, pz = tp[o + 2] + jit * 0.9;
+      const cid = cell(py, pz);
+      for (let it = cellCount[cid]; it < cellCount[cid + 1]; it++) {
+        const f = items[it]; const fc = comp[f]; if (fc === c) continue;
+        const a = F[f * 3] * 3, b = F[f * 3 + 1] * 3, d = F[f * 3 + 2] * 3;
+        const ay = V[a + 1], az = V[a + 2], by = V[b + 1], bz = V[b + 2], cy = V[d + 1], cz = V[d + 2];
+        const d1 = (by - ay) * (pz - az) - (bz - az) * (py - ay);
+        const d2 = (cy - by) * (pz - bz) - (cz - bz) * (py - by);
+        const d3 = (ay - cy) * (pz - cz) - (az - cz) * (py - cy);
+        if (!((d1 > 0 && d2 > 0 && d3 > 0) || (d1 < 0 && d2 < 0 && d3 < 0))) continue;
+        const ax = V[a], bx = V[b], cx = V[d];
+        const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        if (Math.abs(nx) < 1e-300) continue;
+        const x = ax - (ny * (py - ay) + nz * (pz - az)) / nx;
+        if (hits[fc] === 0 && !graze[fc]) touched.push(fc);
+        if (Math.abs(x - px) <= grazeEps) graze[fc] = 1; else if (x > px) hits[fc]++;
+      }
+      for (let i = 0; i < touched.length; i++) {
+        const b = touched[i];
+        if (insideCnt[b] === 0 && grazeCnt[b] === 0) pairTouched.push(b);
+        if (graze[b]) grazeCnt[b]++; else if (hits[b] & 1) insideCnt[b]++;
+        hits[b] = 0; graze[b] = 0;
+      }
+      touched.length = 0;
+    }
+    let dpt = 0;
+    for (let i = 0; i < pairTouched.length; i++) {
+      const b = pairTouched[i]; const known = np - grazeCnt[b];
+      if (known > 0 && insideCnt[b] === known) dpt++;
+      insideCnt[b] = 0; grazeCnt[b] = 0;
+    }
+    pairTouched.length = 0; depth[c] = dpt;
+  }
+  return depth;
+}
+
+/* decide per component whether the whole component must be flipped (after local consistency) */
+function componentOrientation(mesh, opp, comp, ncomp, flip, storedNormals, quick) {
+  const nf = mesh.nf, F = mesh.F, V = mesh.V, dead = mesh.dead, src = mesh.src;
+  const closed = new Uint8Array(ncomp).fill(1);
+  const vol = new Float64Array(ncomp), vote = new Float64Array(ncomp), area = new Float64Array(ncomp);
+  const n = [0, 0, 0];
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue; const c = comp[f]; if (c < 0) continue;
+    const sgn = flip[f] ? -1 : 1;
+    for (let k = 0; k < 3; k++) if (opp[f * 3 + k] < 0) { closed[c] = 0; break; }
+    vol[c] += sgn * det3(V, F[f * 3], F[f * 3 + 1], F[f * 3 + 2]);
+    area[c] += faceNormalInto(V, F, f, n);
+    if (storedNormals && src[f] >= 0) {
+      const s = src[f] * 3;
+      vote[c] += sgn * (n[0] * storedNormals[s] + n[1] * storedNormals[s + 1] + n[2] * storedNormals[s + 2]);
+    }
+  }
+  const depth = quick ? new Int32Array(ncomp) : nestingDepths(mesh, comp, ncomp, closed);
+  const compFlip = new Uint8Array(ncomp);
+  for (let c = 0; c < ncomp; c++) {
+    if (closed[c]) {
+      if (Math.abs(vol[c]) < 1e-300) continue;
+      const want = (depth[c] & 1) ? -1 : 1;
+      if ((vol[c] < 0 ? -1 : 1) !== want) compFlip[c] = 1;
+    } else {
+      if (Math.abs(vote[c]) > 1e-9) compFlip[c] = vote[c] < 0 ? 1 : 0;
+      else compFlip[c] = vol[c] < 0 ? 1 : 0;
+    }
+  }
+  return { compFlip, closed, vol, depth, area };
+}
+
+function applyFlips(mesh, flip, compFlip, comp) {
+  const F = mesh.F, flags = mesh.flags, dead = mesh.dead; let n = 0;
+  for (let f = 0; f < mesh.nf; f++) {
+    if (dead[f]) continue;
+    if ((flip[f] ^ (compFlip ? compFlip[comp[f]] : 0)) & 1) {
+      const t = F[f * 3 + 1]; F[f * 3 + 1] = F[f * 3 + 2]; F[f * 3 + 2] = t; flags[f] ^= FLAG_FLIPPED; n++;
+    }
+  }
+  return n;
+}
+
+/* ------------------------------------------------------------- duplicates */
+function findDuplicates(mesh, cancelOpposite, topo) {
+  const nf = mesh.nf, F = mesh.F, dead = mesh.dead;
+  const size = nextPow2(Math.max(16, nf * 2)), mask = size - 1;
+  const table = new Int32Array(size).fill(-1);
+  const gParity = new Int8Array(nf), gMixed = new Uint8Array(nf), gCount = new Int32Array(nf);
+  const group = new Int32Array(nf).fill(-1);
+  const key = new Uint32Array(nf * 3);
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue;
+    let a = F[f * 3], b = F[f * 3 + 1], c = F[f * 3 + 2];
+    if (a === b || b === c || a === c) continue;
+    const inv = (a > b ? 1 : 0) + (a > c ? 1 : 0) + (b > c ? 1 : 0);
+    let t; if (a > b) { t = a; a = b; b = t; } if (b > c) { t = b; b = c; c = t; } if (a > b) { t = a; a = b; b = t; }
+    key[f * 3] = a; key[f * 3 + 1] = b; key[f * 3 + 2] = c;
+    let h = mix3(a, b, c) & mask, g = -1;
+    while (true) { const t2 = table[h]; if (t2 < 0) break; if (key[t2 * 3] === a && key[t2 * 3 + 1] === b && key[t2 * 3 + 2] === c) { g = t2; break; } h = (h + 1) & mask; }
+    if (g < 0) { table[h] = f; group[f] = f; gParity[f] = inv & 1; gCount[f] = 1; }
+    else { group[f] = g; gCount[g]++; if ((inv & 1) !== gParity[g]) gMixed[g] = 1; }
+  }
+  // keeper per group. Same winding: keep the first. Opposite windings: keep the copy whose edges agree with the
+  // surrounding faces (a hole fill agrees by construction); a pair with no outside neighbours at all is a
+  // zero-volume flap and both copies go.
+  const keeper = new Int32Array(nf).fill(-1), best = new Int32Array(nf).fill(-1); const flags = mesh.flags;
+  const consistentNeighbours = (f) => {
+    if (!topo) return (flags[f] & FLAG_FILL) ? 1 : 0;
+    let n = 0;
+    for (let k = 0; k < 3; k++) {
+      const s = f * 3 + k, e = topo.sEdge[s]; if (e < 0) continue;
+      const a = F[s], b = F[f * 3 + (k === 2 ? 0 : k + 1)];
+      for (let t = topo.eFirst[e]; t >= 0; t = topo.sNext[t]) {
+        const h = (t / 3) | 0; if (h === f || group[h] === group[f] || dead[h]) continue;
+        const hk = t % 3; const c = F[t], d = F[h * 3 + (hk === 2 ? 0 : hk + 1)];
+        if (c === b && d === a) { n++; break; }
+      }
+    }
+    return n;
+  };
+  for (let f = 0; f < nf; f++) {
+    const g = group[f]; if (g < 0 || gCount[g] < 2) continue;
+    if (!gMixed[g]) { if (keeper[g] < 0) keeper[g] = f; continue; }
+    if (cancelOpposite !== false) continue;
+    const sc = consistentNeighbours(f);
+    if (sc > best[g] || (sc === best[g] && (flags[f] & FLAG_FILL) && !(flags[keeper[g]] & FLAG_FILL))) { best[g] = sc; keeper[g] = f; }
+  }
+  const remove = []; let dupCount = 0, cancelled = 0;
+  for (let f = 0; f < nf; f++) {
+    const g = group[f]; if (g < 0 || gCount[g] < 2) continue;
+    if (gMixed[g] && (cancelOpposite !== false || best[g] <= 0)) { remove.push(f); cancelled++; }
+    else if (f !== keeper[g]) remove.push(f);
+    if (f !== g) dupCount++;
+  }
+  return { count: dupCount, remove, cancelled };
+}
+
+/* ------------------------------------------------------------ degenerates */
+function classifyDegenerate(mesh, tol) {
+  const nf = mesh.nf, F = mesh.F, V = mesh.V, dead = mesh.dead;
+  const needles = [], caps = [];   // needles: [f, va, vb]  caps: [f, baseSlot(0..2)]
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue;
+    const a = F[f * 3], b = F[f * 3 + 1], c = F[f * 3 + 2];
+    if (a === b || b === c || c === a) { needles.push(f, -1, -1); continue; }
+    const ax = V[a * 3], ay = V[a * 3 + 1], az = V[a * 3 + 2], bx = V[b * 3], by = V[b * 3 + 1], bz = V[b * 3 + 2], cx = V[c * 3], cy = V[c * 3 + 1], cz = V[c * 3 + 2];
+    const lab = Math.hypot(bx - ax, by - ay, bz - az), lbc = Math.hypot(cx - bx, cy - by, cz - bz), lca = Math.hypot(ax - cx, ay - cy, az - cz);
+    let mn = lab, va = a, vb = b;
+    if (lbc < mn) { mn = lbc; va = b; vb = c; }
+    if (lca < mn) { mn = lca; va = c; vb = a; }
+    if (mn < tol) { needles.push(f, va, vb); continue; }
+    const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+    const area2 = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    let longest = lab, slot = 0; if (lbc > longest) { longest = lbc; slot = 1; } if (lca > longest) { longest = lca; slot = 2; }
+    if (area2 / longest < tol) caps.push(f, slot);
+  }
+  return { needles, caps };
+}
+
+function collapseNeedles(mesh, needles) {
+  const parent = new Int32Array(mesh.nv); for (let i = 0; i < mesh.nv; i++) parent[i] = i;
+  const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  let merges = 0;
+  for (let i = 0; i < needles.length; i += 3) {
+    const va = needles[i + 1], vb = needles[i + 2]; if (va < 0) continue;
+    const ra = find(va), rb = find(vb); if (ra !== rb) { parent[rb] = ra; merges++; }
+  }
+  const F = mesh.F; let killed = 0;
+  if (merges) for (let i = 0; i < mesh.nf * 3; i++) F[i] = find(F[i]);
+  for (let f = 0; f < mesh.nf; f++) {
+    if (mesh.dead[f]) continue;
+    const a = F[f * 3], b = F[f * 3 + 1], c = F[f * 3 + 2];
+    if (a === b || b === c || c === a) { mesh.killFace(f); killed++; }
+  }
+  return killed;
+}
+
+/* split a face along the edge at slot k, inserting the given vertices (in order from F[s] to F[next]) */
+function splitFaceEdge(mesh, f, k, inserts) {
+  const F = mesh.F, b0 = f * 3;
+  const a = F[b0 + k], b = F[b0 + (k === 2 ? 0 : k + 1)], d = F[b0 + (k === 0 ? 2 : k - 1)];
+  const src = mesh.src[f], fl = mesh.flags[f] | FLAG_SPLIT;
+  mesh.killFace(f);
+  let prev = a;
+  for (let i = 0; i < inserts.length; i++) { mesh.addFace(prev, inserts[i], d, src, fl); prev = inserts[i]; }
+  mesh.addFace(prev, b, d, src, fl);
+}
+
+/* zero-height (collinear) faces are removed; the exposed collinear gap is closed by gap welding + T-junction stitching */
+function removeCaps(mesh, caps) {
+  let n = 0;
+  for (let i = 0; i < caps.length; i += 2) { const f = caps[i]; if (!mesh.dead[f]) { mesh.killFace(f); n++; } }
+  return n;
+}
+
+/* ----------------------------------------------------------- non-manifold */
+function fixNonManifold(mesh, topo, comp, iteration) {
+  const F = mesh.F, V = mesh.V, opp = topo.opp;
+  const n = [0, 0, 0];
+  let removed = 0, paired = 0;
+  for (const e of topo.nmEdges) {
+    const rays = [];
+    const a = topo.eLo[e], b = topo.eHi[e];
+    let dx = V[b * 3] - V[a * 3], dy = V[b * 3 + 1] - V[a * 3 + 1], dz = V[b * 3 + 2] - V[a * 3 + 2];
+    const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+    // frame u,v with u x v = d
+    let tx = 0, ty = 0, tz = 0; const adx = Math.abs(dx), ady = Math.abs(dy), adz = Math.abs(dz);
+    if (adx <= ady && adx <= adz) tx = 1; else if (ady <= adz) ty = 1; else tz = 1;
+    let ux = ty * dz - tz * dy, uy = tz * dx - tx * dz, uz = tx * dy - ty * dx;
+    const ul = Math.hypot(ux, uy, uz) || 1; ux /= ul; uy /= ul; uz /= ul;
+    const vx = dy * uz - dz * uy, vy = dz * ux - dx * uz, vz = dx * uy - dy * ux;
+    for (let s = topo.eFirst[e]; s >= 0; s = topo.sNext[s]) {
+      const f = (s / 3) | 0; if (mesh.dead[f]) continue;
+      const k = s % 3, c = F[f * 3 + (k === 0 ? 2 : k - 1)];
+      let wx = V[c * 3] - V[a * 3], wy = V[c * 3 + 1] - V[a * 3 + 1], wz = V[c * 3 + 2] - V[a * 3 + 2];
+      const wd = wx * dx + wy * dy + wz * dz; wx -= wd * dx; wy -= wd * dy; wz -= wd * dz;
+      const wl = Math.hypot(wx, wy, wz) || 1; wx /= wl; wy /= wl; wz /= wl;
+      const theta = Math.atan2(wx * vx + wy * vy + wz * vz, wx * ux + wy * uy + wz * uz);
+      faceNormalInto(V, F, f, n);
+      // rotate w by +90deg about d: d x w
+      const px = dy * wz - dz * wy, py = dz * wx - dx * wz, pz = dx * wy - dy * wx;
+      const matCCW = (px * n[0] + py * n[1] + pz * n[2]) < 0;
+      rays.push({ s, f, theta, matCCW, comp: comp[f] });
+    }
+    const k = rays.length;
+    if (k < 3) { if (k === 2) { opp[rays[0].s] = rays[1].s; opp[rays[1].s] = rays[0].s; } continue; }
+    rays.sort((p, q) => p.theta - q.theta);
+    const pairScore = (r1, r2) => (r1.comp === r2.comp ? 4 : 0) + ((r1.matCCW && !r2.matCCW) ? 2 : 0);
+    let best = null, bestScore = -Infinity;
+    const leftoverOptions = (k & 1) ? rays.map((_, i) => i) : [-1];
+    for (const lo of leftoverOptions) {
+      const rest = lo < 0 ? rays : rays.filter((_, i) => i !== lo);
+      const m = rest.length;
+      for (let parity = 0; parity < 2; parity++) {
+        let score = 0; const pairs = [];
+        for (let i = parity; i < m + parity; i += 2) {
+          const r1 = rest[i % m], r2 = rest[(i + 1) % m];
+          score += pairScore(r1, r2); pairs.push([r1, r2]);
+        }
+        if (score > bestScore) { bestScore = score; best = { pairs, leftover: lo < 0 ? null : rays[lo] }; }
+      }
+    }
+    if (iteration >= 2 && best.pairs.length > 1) {
+      // still non-manifold after a previous attempt: keep only the best pair, drop the rest
+      best.pairs.sort((p, q) => pairScore(q[0], q[1]) - pairScore(p[0], p[1]));
+      for (let i = 1; i < best.pairs.length; i++) { mesh.killFace(best.pairs[i][0].f); mesh.killFace(best.pairs[i][1].f); removed += 2; }
+      best.pairs.length = 1;
+    }
+    for (const [r1, r2] of best.pairs) { opp[r1.s] = r2.s; opp[r2.s] = r1.s; paired++; }
+    if (best.leftover) { mesh.killFace(best.leftover.f); removed++; }
+  }
+  // clear pairings that point at dead faces
+  for (let s = 0; s < mesh.nf * 3; s++) { const o = opp[s]; if (o >= 0 && (mesh.dead[(o / 3) | 0] || mesh.dead[(s / 3) | 0])) opp[s] = -1; }
+  const split = splitVertices(mesh, opp);
+  return { removed, paired, split };
+}
+
+/* separate vertex umbrellas that are not a single disk / half-disk */
+function splitVertices(mesh, opp) {
+  const nf = mesh.nf, F = mesh.F, dead = mesh.dead, nv0 = mesh.nv;
+  const vCount = new Int32Array(nv0 + 1);
+  for (let f = 0; f < nf; f++) { if (dead[f]) continue; vCount[F[f * 3] + 1]++; vCount[F[f * 3 + 1] + 1]++; vCount[F[f * 3 + 2] + 1]++; }
+  for (let v = 0; v < nv0; v++) vCount[v + 1] += vCount[v];
+  const corners = new Int32Array(vCount[nv0]); const fillp = vCount.slice(0, nv0);
+  for (let f = 0; f < nf; f++) { if (dead[f]) continue; for (let c = 0; c < 3; c++) corners[fillp[F[f * 3 + c]]++] = f * 3 + c; }
+  const parent = new Int32Array(nf * 3);
+  const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  let created = 0;
+  const V = mesh.V;
+  for (let v = 0; v < nv0; v++) {
+    const st = vCount[v], en = vCount[v + 1]; if (en - st < 2) continue;
+    for (let i = st; i < en; i++) parent[corners[i]] = corners[i];
+    for (let i = st; i < en; i++) {
+      const s = corners[i], f = (s / 3) | 0, c = s % 3;
+      // outgoing edge slot c: (v -> next). Opposite half-edge is (next -> v); v's corner there is (o%3+1)%3
+      const o1 = opp[s];
+      if (o1 >= 0) { const h = (o1 / 3) | 0, oc = (o1 % 3 + 1) % 3; const ra = find(s), rb = find(h * 3 + oc); if (ra !== rb) parent[rb] = ra; }
+      // incoming edge slot (c+2)%3: (prev -> v). Opposite is (v -> prev); v's corner there is o%3
+      const s2 = f * 3 + (c === 0 ? 2 : c - 1), o2 = opp[s2];
+      if (o2 >= 0) { const h = (o2 / 3) | 0, oc = o2 % 3; const ra = find(s), rb = find(h * 3 + oc); if (ra !== rb) parent[rb] = ra; }
+    }
+    // group by root; first root keeps v
+    let firstRoot = -1; let rootMap = null;
+    for (let i = st; i < en; i++) {
+      const s = corners[i], r = find(s);
+      if (firstRoot < 0) { firstRoot = r; continue; }
+      if (r === firstRoot) continue;
+      if (!rootMap) rootMap = new Map();
+      let nvid = rootMap.get(r);
+      if (nvid === undefined) { nvid = mesh.addVertex(V[v * 3], V[v * 3 + 1], V[v * 3 + 2]); rootMap.set(r, nvid); created++; }
+      mesh.F[s] = nvid;
+    }
+  }
+  return created;
+}
+
+/* ------------------------------------------------------------ T-junctions */
+function fixTJunctions(mesh, topo, tol, endTol) {
+  endTol = endTol || tol;
+  const F = mesh.F, V = mesh.V, nf = mesh.nf;
+  const isB = new Uint8Array(mesh.nv); const bslots = [];
+  for (let s = 0; s < nf * 3; s++) {
+    const e = topo.sEdge[s]; if (e < 0 || topo.eCnt[e] !== 1) continue; if (mesh.dead[(s / 3) | 0]) continue;
+    bslots.push(s); isB[topo.eLo[e]] = 1; isB[topo.eHi[e]] = 1;
+  }
+  if (bslots.length < 2) return 0;
+  // boundary neighbours of every boundary vertex (a T-junction vertex has boundary edges running along the coarse edge)
+  const nbHead = new Int32Array(mesh.nv).fill(-1), nbNext = new Int32Array(bslots.length * 2), nbVert = new Int32Array(bslots.length * 2); let nbn = 0;
+  const addNb = (v, w) => { nbVert[nbn] = w; nbNext[nbn] = nbHead[v]; nbHead[v] = nbn++; };
+  for (const s of bslots) { const e = topo.sEdge[s]; addNb(topo.eLo[e], topo.eHi[e]); addNb(topo.eHi[e], topo.eLo[e]); }
+  const bv = []; for (let v = 0; v < mesh.nv; v++) if (isB[v]) bv.push(v);
+  bv.sort((p, q) => V[p * 3] - V[q * 3]);
+  const bx = new Float64Array(bv.length); for (let i = 0; i < bv.length; i++) bx[i] = V[bv[i] * 3];
+  const lowerBound = (x) => { let lo = 0, hi = bx.length; while (lo < hi) { const m = (lo + hi) >> 1; if (bx[m] < x) lo = m + 1; else hi = m; } return lo; };
+  const perFace = new Map(); // f -> { slot -> [ {v,t} ] }
+  const tol2 = tol * tol; let budget = 4e7;
+  const why = { t: 0, dist: 0, end: 0, along: 0, fresh: 0, full: 0, cand: 0 };
+  for (const s of bslots) {
+    const f = (s / 3) | 0, k = s % 3;
+    const a = F[s], b = F[f * 3 + (k === 2 ? 0 : k + 1)], d = F[f * 3 + (k === 0 ? 2 : k - 1)];
+    const ax = V[a * 3], ay = V[a * 3 + 1], az = V[a * 3 + 2];
+    const ex = V[b * 3] - ax, ey = V[b * 3 + 1] - ay, ez = V[b * 3 + 2] - az;
+    const el2 = ex * ex + ey * ey + ez * ez; if (el2 <= tol2 * 4) continue;
+    const xmin = Math.min(ax, V[b * 3]) - tol, xmax = Math.max(ax, V[b * 3]) + tol;
+    let i = lowerBound(xmin);
+    for (; i < bv.length && bx[i] <= xmax; i++) {
+      if (--budget < 0) break;
+      const c = bv[i]; if (c === a || c === b || c === d) continue;
+      const cx = V[c * 3] - ax, cy = V[c * 3 + 1] - ay, cz = V[c * 3 + 2] - az;
+      const t = (cx * ex + cy * ey + cz * ez) / el2; if (t <= 0 || t >= 1) { why.t++; continue; }
+      const px = cx - t * ex, py = cy - t * ey, pz = cz - t * ez;
+      if (px * px + py * py + pz * pz > tol2) { why.dist++; continue; }
+      why.cand++;
+      // must be away from endpoints
+      const el = Math.sqrt(el2); if (t * el < endTol || (1 - t) * el < endTol) { why.end++; continue; }
+      // a boundary neighbour of c must also lie on the segment (or at one of its ends): the fine boundary runs along ab
+      let along = false;
+      for (let q = nbHead[c]; q >= 0 && !along; q = nbNext[q]) {
+        const w = nbVert[q]; if (w === a || w === b) { along = true; break; }
+        const wx = V[w * 3] - ax, wy = V[w * 3 + 1] - ay, wz = V[w * 3 + 2] - az;
+        const tw = (wx * ex + wy * ey + wz * ez) / el2; if (tw < -tol / el || tw > 1 + tol / el) continue;
+        const qx = wx - tw * ex, qy = wy - tw * ey, qz = wz - tw * ez;
+        if (qx * qx + qy * qy + qz * qz <= tol2) along = true;
+      }
+      if (!along) { why.along++; continue; }
+      let entry = perFace.get(f); if (!entry) { entry = new Map(); perFace.set(f, entry); }
+      let list = entry.get(k); if (!list) { list = []; entry.set(k, list); }
+      list.push({ v: c, t });
+    }
+    if (budget < 0) break;
+  }
+  let splits = 0, skippedFaces = 0;
+  if (api._dbg) api._dbg.push(`fixTJunctions: tol=${tol.toExponential(3)} endTol=${endTol.toExponential(3)} bslots=${bslots.length} bverts=${bv.length} facesWithInserts=${perFace.size} reasons=${JSON.stringify(why)}`);
+  api._why = why;
+  for (const [f, slots] of perFace) {
+    if (mesh.dead[f]) continue;
+    for (const list of slots.values()) { list.sort((p, q) => p.t - q.t); }
+    let single = slots.size === 1;
+    if (single) {
+      const [k, list] = slots.entries().next().value;
+      const seen = new Set(); const ins = [];
+      for (const it of list) if (!seen.has(it.v)) { seen.add(it.v); ins.push(it.v); }
+      const d = F[f * 3 + (k === 0 ? 2 : k - 1)];
+      const a = F[f * 3 + k], b = F[f * 3 + (k === 2 ? 0 : k + 1)];
+      let fresh = true; for (const v of ins) if (topo.findEdge(v, d) >= 0) { fresh = false; break; }
+      const seq = [a, ...ins, b];
+      for (let i = 0; i + 1 < seq.length && fresh; i++) { const e2 = topo.findEdge(seq[i], seq[i + 1]); if (e2 >= 0 && topo.eCnt[e2] >= 2) fresh = false; }
+      if (fresh) { splitFaceEdge(mesh, f, k, ins); splits += ins.length; } else { skippedFaces++; why.fresh++; continue; }
+    }
+    if (!single) {
+      let ok = true;
+      for (let k = 0; k < 3 && ok; k++) {
+        const list = slots.get(k); if (!list) continue;
+        const seq = [F[f * 3 + k]]; const seen = new Set(); for (const it of list) if (!seen.has(it.v)) { seen.add(it.v); seq.push(it.v); } seq.push(F[f * 3 + (k === 2 ? 0 : k + 1)]);
+        for (let i = 0; i + 1 < seq.length; i++) { const e2 = topo.findEdge(seq[i], seq[i + 1]); if (e2 >= 0 && topo.eCnt[e2] >= 2) { ok = false; break; } }
+      }
+      if (!ok) { skippedFaces++; why.full++; continue; }
+      // polygon around the face with inserted points; fan from centroid to avoid collinear triangles
+      const poly = [];
+      for (let k = 0; k < 3; k++) {
+        poly.push(F[f * 3 + k]);
+        const list = slots.get(k); if (list) { const seen = new Set(); for (const it of list) if (!seen.has(it.v)) { seen.add(it.v); poly.push(it.v); splits++; } }
+      }
+      const a = F[f * 3], b = F[f * 3 + 1], c = F[f * 3 + 2];
+      const cen = mesh.addVertex((V[a * 3] + V[b * 3] + V[c * 3]) / 3, (V[a * 3 + 1] + V[b * 3 + 1] + V[c * 3 + 1]) / 3, (V[a * 3 + 2] + V[b * 3 + 2] + V[c * 3 + 2]) / 3);
+      const src = mesh.src[f], fl = mesh.flags[f] | FLAG_SPLIT; mesh.killFace(f);
+      for (let i = 0; i < poly.length; i++) mesh.addFace(poly[i], poly[(i + 1) % poly.length], cen, src, fl);
+    }
+  }
+  if (api._dbg) api._dbg.push(`fixTJunctions: splits=${splits} skippedFaces=${skippedFaces} reasons=${JSON.stringify(why)}`);
+  return splits;
+}
+
+/* ----------------------------------------------------------- hole finding */
+function boundaryLoops(mesh, topo) {
+  const nf = mesh.nf, F = mesh.F, nv = mesh.nv;
+  const outHead = new Int32Array(nv).fill(-1), outNext = new Int32Array(nf * 3).fill(-1), used = new Uint8Array(nf * 3);
+  let nb = 0;
+  for (let s = 0; s < nf * 3; s++) {
+    const e = topo.sEdge[s]; if (e < 0 || topo.eCnt[e] !== 1 || mesh.dead[(s / 3) | 0]) continue;
+    const a = F[s]; outNext[s] = outHead[a]; outHead[a] = s; nb++;
+  }
+  const loops = [], loopSlots = []; let broken = 0;
+  if (!nb) return { loops, loopSlots, broken, boundarySlots: 0 };
+  for (let s0 = 0; s0 < nf * 3; s0++) {
+    if (used[s0] || !isBoundarySlot(s0)) continue;
+    const verts = [], slots = []; let s = s0; let ok = false; let guard = nb + 1;
+    while (guard-- > 0) {
+      used[s] = 1; verts.push(F[s]); slots.push(s);
+      const f = (s / 3) | 0, k = s % 3, b = F[f * 3 + (k === 2 ? 0 : k + 1)];
+      if (b === F[s0]) { ok = true; break; }
+      let nxt = -1;
+      for (let t = outHead[b]; t >= 0; t = outNext[t]) if (!used[t]) { nxt = t; break; }
+      if (nxt < 0) break;
+      s = nxt;
+    }
+    if (ok && verts.length >= 3) { loops.push(verts); loopSlots.push(slots); } else broken++;
+  }
+  function isBoundarySlot(s) { const e = topo.sEdge[s]; return e >= 0 && topo.eCnt[e] === 1 && !mesh.dead[(s / 3) | 0]; }
+  return { loops, loopSlots, broken, boundarySlots: nb };
+}
+
+function loopGeometry(V, loop) {
+  // Newell normal, centroid, planarity, extent
+  const n = loop.length; let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
+  let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const a = loop[i] * 3, b = loop[(i + 1) % n] * 3;
+    const ax = V[a], ay = V[a + 1], az = V[a + 2], bx = V[b], by = V[b + 1], bz = V[b + 2];
+    nx += (ay - by) * (az + bz); ny += (az - bz) * (ax + bx); nz += (ax - bx) * (ay + by);
+    cx += ax; cy += ay; cz += az;
+    if (ax < mnx) mnx = ax; if (ax > mxx) mxx = ax; if (ay < mny) mny = ay; if (ay > mxy) mxy = ay; if (az < mnz) mnz = az; if (az > mxz) mxz = az;
+  }
+  const nl = Math.hypot(nx, ny, nz);
+  if (nl > 0) { nx /= nl; ny /= nl; nz /= nl; }
+  cx /= n; cy /= n; cz /= n;
+  let maxDev = 0, perimeter = 0;
+  for (let i = 0; i < n; i++) {
+    const a = loop[i] * 3, b = loop[(i + 1) % n] * 3;
+    const dev = Math.abs((V[a] - cx) * nx + (V[a + 1] - cy) * ny + (V[a + 2] - cz) * nz); if (dev > maxDev) maxDev = dev;
+    perimeter += Math.hypot(V[b] - V[a], V[b + 1] - V[a + 1], V[b + 2] - V[a + 2]);
+  }
+  const extent = Math.hypot(mxx - mnx, mxy - mny, mxz - mnz);
+  return { n: [nx, ny, nz], c: [cx, cy, cz], maxDev, extent, perimeter, degenerateNormal: nl === 0, area2: nl, min: [mnx, mny, mnz], max: [mxx, mxy, mxz] };
+}
+
+/* 2D basis for a plane normal */
+function planeBasis(n) {
+  const ax = Math.abs(n[0]), ay = Math.abs(n[1]), az = Math.abs(n[2]);
+  let t = ax <= ay && ax <= az ? [1, 0, 0] : (ay <= az ? [0, 1, 0] : [0, 0, 1]);
+  let u = [t[1] * n[2] - t[2] * n[1], t[2] * n[0] - t[0] * n[2], t[0] * n[1] - t[1] * n[0]];
+  const ul = Math.hypot(u[0], u[1], u[2]) || 1; u = [u[0] / ul, u[1] / ul, u[2] / ul];
+  const v = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
+  return { u, v };
+}
+
+/* ---- minimum-weight triangulation (Liepa 2003): weight = (max dihedral, area) ---- */
+function triangulateDP(V, poly, edgeNormals, canConnect) {
+  const n = poly.length;
+  const forb = new Uint8Array(n * n);
+  if (canConnect) for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) { if (i === 0 && j === n - 1) continue; if (!canConnect(poly[i], poly[j])) forb[i * n + j] = 1; }
+  const P = new Float64Array(n * 3);
+  for (let i = 0; i < n; i++) { P[i * 3] = V[poly[i] * 3]; P[i * 3 + 1] = V[poly[i] * 3 + 1]; P[i * 3 + 2] = V[poly[i] * 3 + 2]; }
+  const A = new Float64Array(n * n).fill(0), R = new Float64Array(n * n).fill(0), L = new Int32Array(n * n).fill(-1);
+  const N = new Float64Array(n * n * 3); // normal of the triangle chosen for span (i,j) (i.e. triangle i, L[i,j], j)
+  const triNormal = (i, k, j, out) => {
+    const ux = P[k * 3] - P[i * 3], uy = P[k * 3 + 1] - P[i * 3 + 1], uz = P[k * 3 + 2] - P[i * 3 + 2];
+    const vx = P[j * 3] - P[i * 3], vy = P[j * 3 + 1] - P[i * 3 + 1], vz = P[j * 3 + 2] - P[i * 3 + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz); if (l > 0) { nx /= l; ny /= l; nz /= l; }
+    out[0] = nx; out[1] = ny; out[2] = nz; return l * 0.5;
+  };
+  const dih = (n1, o1, n2, o2) => { const d = n1[o1] * n2[o2] + n1[o1 + 1] * n2[o2 + 1] + n1[o1 + 2] * n2[o2 + 2]; return Math.acos(Math.max(-1, Math.min(1, d))); };
+  const tn = [0, 0, 0];
+  for (let len = 2; len < n; len++) {
+    for (let i = 0; i + len < n; i++) {
+      const j = i + len; let bestA = Infinity, bestR = Infinity, bestK = -1, bnx = 0, bny = 0, bnz = 0;
+      for (let k = i + 1; k < j; k++) {
+        if ((k - i >= 2 && (forb[i * n + k] || L[i * n + k] < 0)) || (j - k >= 2 && (forb[k * n + j] || L[k * n + j] < 0))) continue;
+        const area = triNormal(i, k, j, tn);
+        let ang = Math.max(A[i * n + k], A[k * n + j]);
+        // dihedral with left span (i,k)
+        let d1;
+        if (k === i + 1) d1 = dih(tn, 0, edgeNormals, i * 3); else d1 = dih(tn, 0, N, (i * n + k) * 3);
+        let d2;
+        if (j === k + 1) d2 = dih(tn, 0, edgeNormals, k * 3); else d2 = dih(tn, 0, N, (k * n + j) * 3);
+        let d3 = 0;
+        if (i === 0 && j === n - 1) d3 = dih(tn, 0, edgeNormals, (n - 1) * 3);
+        ang = Math.max(ang, d1, d2, d3);
+        const r = R[i * n + k] + R[k * n + j] + area;
+        if (ang < bestA - 1e-9 || (Math.abs(ang - bestA) <= 1e-9 && r < bestR)) { bestA = ang; bestR = r; bestK = k; bnx = tn[0]; bny = tn[1]; bnz = tn[2]; }
+      }
+      A[i * n + j] = bestA; R[i * n + j] = bestR; L[i * n + j] = bestK;
+      N[(i * n + j) * 3] = bnx; N[(i * n + j) * 3 + 1] = bny; N[(i * n + j) * 3 + 2] = bnz;
+    }
+  }
+  if (L[n - 1] < 0) return null;
+  const tris = [];
+  const rec = (i, j) => { if (j - i < 2) return; const k = L[i * n + j]; tris.push(poly[i], poly[k], poly[j]); rec(i, k); rec(k, j); };
+  rec(0, n - 1);
+  return tris;
+}
+
+/* ---- 2D ear clipping with hole bridging (outer CCW, holes CW). Returns flat index triples into pts ---- */
+function earClip2D(px, py, outer, holes, canConnect) {
+  const mk = (i) => ({ i, x: px[i], y: py[i], prev: null, next: null });
+  const link = (ids) => {
+    let head = null, last = null;
+    for (const i of ids) { const nd = mk(i); if (!head) head = nd; else { last.next = nd; nd.prev = last; } last = nd; }
+    if (head) { head.prev = last; last.next = head; }
+    return head;
+  };
+  const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const inTri = (ax, ay, bx, by, cx, cy, x, y) => ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) >= 0 && ((cx - bx) * (y - by) - (cy - by) * (x - bx)) >= 0 && ((ax - cx) * (y - cy) - (ay - cy) * (x - cx)) >= 0;
+  let head = link(outer);
+  if (!head) return [];
+  // remove consecutive duplicate points
+  const dedupe = (h) => {
+    let n = 0, p = h; do { n++; p = p.next; } while (p !== h);
+    p = h; let guard = 2 * n + 2;
+    while (guard-- > 0 && p.next !== p) {
+      if (p.x === p.next.x && p.y === p.next.y) { const r = p.next; p.next = r.next; r.next.prev = p; if (r === h) h = p; } else p = p.next;
+    }
+    return h;
+  };
+  head = dedupe(head);
+  const locallyInside = (a, b) => cross(a.prev, a, a.next) > 0 ? (cross(a, b, a.next) <= 0 && cross(a, a.prev, b) <= 0) : (cross(a, b, a.prev) > 0 || cross(a, a.next, b) > 0);
+  // bridge holes, sorted by leftmost x
+  const holeHeads = holes.map((h) => link(h)).filter((h) => h);
+  const leftmost = (h) => { let p = h, m = h; do { if (p.x < m.x || (p.x === m.x && p.y < m.y)) m = p; p = p.next; } while (p !== h); return m; };
+  const queue = holeHeads.map((h) => leftmost(h)).sort((a, b) => a.x - b.x);
+  for (const hole of queue) {
+    const hx = hole.x, hy = hole.y;
+    let qx = -Infinity, m = null, p = head;
+    do {
+      if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
+        const x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
+        if (x <= hx && x > qx) { qx = x; m = p.x < p.next.x ? p : p.next; if (x === hx) break; }
+      }
+      p = p.next;
+    } while (p !== head);
+    if (!m) continue;
+    const stop = m, mx = m.x, my = m.y; let tanMin = Infinity; p = m;
+    do {
+      if (hx >= p.x && p.x >= mx && hx !== p.x && inTri(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
+        const tan = Math.abs(hy - p.y) / (hx - p.x);
+        if (locallyInside(p, hole) && (tan < tanMin || (tan === tanMin && p.x > m.x))) { m = p; tanMin = tan; }
+      }
+      p = p.next;
+    } while (p !== stop);
+    // split: connect m -> hole
+    const a = m, b = hole;
+    const a2 = mk(a.i), b2 = mk(b.i);
+    const an = a.next, bp = b.prev;
+    a.next = b; b.prev = a; a2.next = an; an.prev = a2; b2.next = a2; a2.prev = b2; bp.next = b2; b2.prev = bp;
+  }
+  // ear clipping
+  const tris = [];
+  let ear = head, stop = head; let guard = 0;
+  const count = () => { let c = 0, p = head; do { c++; p = p.next; } while (p !== head); return c; };
+  let remaining = count();
+  const isEar = (e) => {
+    const a = e.prev, b = e, c = e.next;
+    if (cross(a, b, c) <= 0) return false;
+    if (canConnect && !canConnect(a.i, c.i)) return false;
+    let p = c.next;
+    while (p !== a) {
+      if (!((p.x === a.x && p.y === a.y) || (p.x === b.x && p.y === b.y) || (p.x === c.x && p.y === c.y)) && inTri(a.x, a.y, b.x, b.y, c.x, c.y, p.x, p.y) && cross(p.prev, p, p.next) <= 0) return false;
+      p = p.next;
+    }
+    return true;
+  };
+  while (remaining > 3) {
+    if (isEar(ear)) {
+      tris.push(ear.prev.i, ear.i, ear.next.i);
+      ear.prev.next = ear.next; ear.next.prev = ear.prev;
+      if (head === ear) head = ear.next;
+      ear = ear.next; stop = ear; remaining--; guard = 0; continue;
+    }
+    ear = ear.next;
+    if (ear === stop) {
+      // no ear found: clip the most convex vertex to guarantee progress
+      let bestE = null, bestC = -Infinity, p = head;
+      do { const c = cross(p.prev, p, p.next) - ((canConnect && !canConnect(p.prev.i, p.next.i)) ? 1e300 : 0); if (c > bestC) { bestC = c; bestE = p; } p = p.next; } while (p !== head);
+      if (!bestE) break;
+      tris.push(bestE.prev.i, bestE.i, bestE.next.i);
+      bestE.prev.next = bestE.next; bestE.next.prev = bestE.prev;
+      if (head === bestE) head = bestE.next;
+      ear = bestE.next; stop = ear; remaining--;
+      if (++guard > remaining + 5) break;
+    }
+  }
+  if (remaining === 3) tris.push(head.i, head.next.i, head.next.next.i);
+  return tris;
+}
+
+/* ---- advancing front by smallest angle (3D, for large non-planar loops) ---- */
+function triangulateFront(V, poly, refN, canConnect) {
+  const n = poly.length; const tris = [];
+  const prev = new Int32Array(n), next = new Int32Array(n), alive = new Uint8Array(n).fill(1);
+  for (let i = 0; i < n; i++) { prev[i] = (i + n - 1) % n; next[i] = (i + 1) % n; }
+  const angleAt = (i) => {
+    const p = poly[prev[i]] * 3, c = poly[i] * 3, q = poly[next[i]] * 3;
+    const ax = V[p] - V[c], ay = V[p + 1] - V[c + 1], az = V[p + 2] - V[c + 2];
+    const bx = V[q] - V[c], by = V[q + 1] - V[c + 1], bz = V[q + 2] - V[c + 2];
+    const cx = by * az - bz * ay, cy = bz * ax - bx * az, cz = bx * ay - by * ax; // b x a
+    const dot = ax * bx + ay * by + az * bz, cl = Math.hypot(cx, cy, cz);
+    let ang = Math.atan2(cl, dot);
+    if (cx * refN[0] + cy * refN[1] + cz * refN[2] < 0) ang = 2 * Math.PI - ang;
+    return ang;
+  };
+  // simple binary heap with lazy invalidation
+  const heap = []; const ver = new Int32Array(n);
+  const push = (i, penalty) => { const item = { i, v: ver[i], a: angleAt(i) + (penalty || 0), pen: !!penalty }; heap.push(item); let k = heap.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (heap[p].a <= heap[k].a) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+  const pop = () => { const top = heap[0]; const last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; while (true) { let l = 2 * k + 1, r = l + 1, m = k; if (l < heap.length && heap[l].a < heap[m].a) m = l; if (r < heap.length && heap[r].a < heap[m].a) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+  for (let i = 0; i < n; i++) push(i);
+  let remaining = n;
+  while (remaining > 3 && heap.length) {
+    const it = pop(); if (!alive[it.i] || it.v !== ver[it.i]) continue;
+    const i = it.i, p = prev[i], q = next[i];
+    if (canConnect && !it.pen && !canConnect(poly[p], poly[q])) { push(i, 10); continue; }
+    tris.push(poly[p], poly[i], poly[q]);
+    alive[i] = 0; next[p] = q; prev[q] = p; remaining--;
+    ver[p]++; ver[q]++; push(p); push(q);
+  }
+  if (remaining === 3) { let i = 0; while (!alive[i]) i++; tris.push(poly[prev[i]], poly[i], poly[next[i]]); }
+  return tris;
+}
+
+function fillHoles(mesh, topo, opts, tol, out, stitchTol) {
+  const { loops, loopSlots, broken } = boundaryLoops(mesh, topo);
+  const V = mesh.V, F = mesh.F;
+  // a new triangle edge must not coincide with an existing interior edge (that would create a non-manifold edge)
+  const canConnect = (a, b) => topo.findEdge(a, b) < 0;
+  const lineDeviation = (loop) => {
+    // max distance of loop vertices from the line through its two most distant vertices
+    let a = loop[0], far = 0, b = a;
+    for (const v of loop) { const d = Math.hypot(V[v * 3] - V[a * 3], V[v * 3 + 1] - V[a * 3 + 1], V[v * 3 + 2] - V[a * 3 + 2]); if (d > far) { far = d; b = v; } }
+    let c = b; far = 0;
+    for (const v of loop) { const d = Math.hypot(V[v * 3] - V[b * 3], V[v * 3 + 1] - V[b * 3 + 1], V[v * 3 + 2] - V[b * 3 + 2]); if (d > far) { far = d; c = v; } }
+    if (far === 0) return 0;
+    const dx = (V[c * 3] - V[b * 3]) / far, dy = (V[c * 3 + 1] - V[b * 3 + 1]) / far, dz = (V[c * 3 + 2] - V[b * 3 + 2]) / far;
+    let maxd = 0;
+    for (const v of loop) { const px = V[v * 3] - V[b * 3], py = V[v * 3 + 1] - V[b * 3 + 1], pz = V[v * 3 + 2] - V[b * 3 + 2]; const t = px * dx + py * dy + pz * dz; const d = Math.hypot(px - t * dx, py - t * dy, pz - t * dz); if (d > maxd) maxd = d; }
+    return maxd;
+  };
+  const maxEdges = opts.maxHoleEdges | 0;
+  const geos = loops.map((l) => loopGeometry(V, l));
+  const consumed = new Uint8Array(loops.length);
+  const planarTol = (g) => Math.max(tol * 4, g.extent * 1e-4);
+  let filled = 0, skipped = 0, islands = 0, collinear = 0;
+  const addTris = (tris, loopIdx) => {
+    // orientation check against first boundary slot of the loop
+    const s0 = loopSlots[loopIdx][0], f0 = (s0 / 3) | 0, k0 = s0 % 3;
+    const a = F[s0], b = F[f0 * 3 + (k0 === 2 ? 0 : k0 + 1)];
+    let flipAll = false;
+    for (let i = 0; i < tris.length; i += 3) {
+      const t0 = tris[i], t1 = tris[i + 1], t2 = tris[i + 2];
+      if ((t0 === a && t1 === b) || (t1 === a && t2 === b) || (t2 === a && t0 === b)) { flipAll = true; break; }
+      if ((t0 === b && t1 === a) || (t1 === b && t2 === a) || (t2 === b && t0 === a)) { flipAll = false; break; }
+    }
+    for (let i = 0; i < tris.length; i += 3) {
+      if (flipAll) mesh.addFace(tris[i], tris[i + 2], tris[i + 1], -1, FLAG_FILL); else mesh.addFace(tris[i], tris[i + 1], tris[i + 2], -1, FLAG_FILL);
+    }
+  };
+  // sort loop indices by extent descending so outer loops are handled before islands
+  const order = loops.map((_, i) => i).sort((p, q) => geos[q].extent - geos[p].extent);
+  for (const li of order) {
+    if (consumed[li]) continue;
+    const loop = loops[li], g = geos[li], n = loop.length;
+    if (maxEdges > 0 && n > maxEdges) { skipped++; consumed[li] = 1; continue; }
+    consumed[li] = 1;
+    if (lineDeviation(loop) < (stitchTol || tol)) collinear++;   // thin gap the stitcher could not close: filled with thin triangles
+    const poly = loop.slice().reverse();
+    if (n === 3) { addTris([poly[0], poly[1], poly[2]], li); filled++; continue; }
+    const planar = !g.degenerateNormal && g.maxDev <= planarTol(g);
+    // nested coplanar islands
+    let holes = [];
+    if (planar) {
+      const { u, v } = planeBasis(g.n);
+      const proj = (vid) => [ (V[vid * 3] - g.c[0]) * u[0] + (V[vid * 3 + 1] - g.c[1]) * u[1] + (V[vid * 3 + 2] - g.c[2]) * u[2], (V[vid * 3] - g.c[0]) * v[0] + (V[vid * 3 + 1] - g.c[1]) * v[1] + (V[vid * 3 + 2] - g.c[2]) * v[2] ];
+      const ox = poly.map((id) => proj(id)[0]), oy = poly.map((id) => proj(id)[1]);
+      const pip = (x, y) => { let inside = false; for (let i = 0, j = ox.length - 1; i < ox.length; j = i++) { if ((oy[i] > y) !== (oy[j] > y) && x < (ox[j] - ox[i]) * (y - oy[i]) / (oy[j] - oy[i]) + ox[i]) inside = !inside; } return inside; };
+      for (const mi of order) {
+        if (consumed[mi] || mi === li) continue;
+        const gm = geos[mi]; if (gm.degenerateNormal || gm.maxDev > planarTol(gm)) continue;
+        if (gm.min[0] < g.min[0] || gm.min[1] < g.min[1] || gm.min[2] < g.min[2] || gm.max[0] > g.max[0] || gm.max[1] > g.max[1] || gm.max[2] > g.max[2]) continue;
+        if (Math.abs(gm.n[0] * g.n[0] + gm.n[1] * g.n[1] + gm.n[2] * g.n[2]) < 0.9999) continue;
+        if (Math.abs((gm.c[0] - g.c[0]) * g.n[0] + (gm.c[1] - g.c[1]) * g.n[1] + (gm.c[2] - g.c[2]) * g.n[2]) > planarTol(g)) continue;
+        // all vertices of candidate must lie inside outer polygon
+        let allIn = true;
+        for (const vid of loops[mi]) { const p = proj(vid); if (!pip(p[0], p[1])) { allIn = false; break; } }
+        if (!allIn) continue;
+        if (maxEdges > 0 && loops[mi].length > maxEdges) continue;
+        holes.push(mi); consumed[mi] = 1;
+      }
+      if (holes.length || n > 150) {
+        // 2D ear clipping with islands
+        const ids = [], xs = [], ys = [];
+        const outerIdx = [];
+        let sa = 0; for (let i = 0; i < n; i++) sa += ox[i] * oy[(i + 1) % n] - ox[(i + 1) % n] * oy[i];
+        const outerSeq = sa < 0 ? poly.slice().reverse() : poly;
+        for (const id of outerSeq) { outerIdx.push(ids.length); ids.push(id); const p = proj(id); xs.push(p[0]); ys.push(p[1]); }
+        const holeIdx = [];
+        for (const mi of holes) {
+          const hl = loops[mi]; const hx = hl.map((id) => proj(id)[0]), hy = hl.map((id) => proj(id)[1]);
+          let ha = 0; for (let i = 0; i < hl.length; i++) ha += hx[i] * hy[(i + 1) % hl.length] - hx[(i + 1) % hl.length] * hy[i];
+          const seq = ha > 0 ? hl.slice().reverse() : hl.slice();
+          const idx = []; for (const id of seq) { idx.push(ids.length); ids.push(id); const p = proj(id); xs.push(p[0]); ys.push(p[1]); }
+          holeIdx.push(idx);
+        }
+        const tri2 = earClip2D(xs, ys, outerIdx, holeIdx, (i, j) => canConnect(ids[i], ids[j]));
+        if (tri2.length >= 3) {
+          const tris = new Array(tri2.length); for (let i = 0; i < tri2.length; i++) tris[i] = ids[tri2[i]];
+          addTris(tris, li); filled++; islands += holes.length; continue;
+        }
+        // fall through to simple fill of the outer loop only
+        for (const mi of holes) consumed[mi] = 0; holes = [];
+      }
+    }
+    if (n <= 150) {
+      // per-edge normals of adjacent existing faces (polygon edge i = poly[i]->poly[i+1] corresponds to loop slot)
+      const en = new Float64Array(n * 3); const tmp = [0, 0, 0];
+      for (let i = 0; i < n; i++) {
+        // poly[i] -> poly[i+1] is loop edge from loop[n-1-i-1]... compute via slot list: poly = reversed loop; polygon edge i connects loop[n-1-i] and loop[n-2-i]; that boundary half-edge starts at loop[n-2-i]
+        const li2 = ((n - 2 - i) % n + n) % n; const s = loopSlots[li][li2];
+        faceNormalInto(V, F, (s / 3) | 0, tmp); en[i * 3] = tmp[0]; en[i * 3 + 1] = tmp[1]; en[i * 3 + 2] = tmp[2];
+      }
+      const tris = triangulateDP(V, poly, en, canConnect);
+      if (tris) { addTris(tris, li); filled++; continue; }
+    }
+    // large non-planar loop: advancing front, fan fallback
+    let refN = g.degenerateNormal ? [0, 0, 1] : g.n;
+    // reference normal should point like the filling faces; the filling faces oppose boundary half-edges, poly is reversed loop, so Newell of poly = -Newell(loop)
+    refN = [-refN[0], -refN[1], -refN[2]];
+    let tris = n > 150 ? triangulateFront(V, poly, refN, canConnect) : [];
+    if (tris.length < 3) {
+      const cen = mesh.addVertex(g.c[0], g.c[1], g.c[2]); tris = [];
+      for (let i = 0; i < n; i++) tris.push(poly[i], poly[(i + 1) % n], cen);
+    }
+    addTris(tris, li); filled++;
+  }
+  if (out) { out.brokenLoops = broken; out.islands = islands; out.skipped = skipped; out.collinear = collinear; }
+  return filled;
+}
+
+/* --------------------------------------------------------------- analysis */
+function analyze(mesh, topo, ctx) {
+  const V = mesh.V, F = mesh.F, nf = mesh.nf, dead = mesh.dead;
+  const tol = ctx.tol;
+  const res = {};
+  // naked & non-manifold edges (as vertex pairs for the viewer)
+  res.nakedEdges = topo.nakedEdges.length; res.nonManifoldEdges = topo.nmEdges.length;
+  const nakedList = new Uint32Array(topo.nakedEdges.length * 2); for (let i = 0; i < topo.nakedEdges.length; i++) { const e = topo.nakedEdges[i]; nakedList[i * 2] = topo.eLo[e]; nakedList[i * 2 + 1] = topo.eHi[e]; }
+  const nmList = new Uint32Array(topo.nmEdges.length * 2); for (let i = 0; i < topo.nmEdges.length; i++) { const e = topo.nmEdges[i]; nmList[i * 2] = topo.eLo[e]; nmList[i * 2 + 1] = topo.eHi[e]; }
+  res.nakedEdgeList = nakedList; res.nonManifoldEdgeList = nmList;
+  // holes
+  const { loops, broken } = boundaryLoops(mesh, topo);
+  let planar = 0, nonPlanar = 0; const holes = [];
+  for (const l of loops) {
+    const g = loopGeometry(V, l);
+    const isPlanar = !g.degenerateNormal && g.maxDev <= Math.max(tol * 4, g.extent * 1e-4);
+    if (isPlanar) planar++; else nonPlanar++;
+    holes.push({ edges: l.length, planar: isPlanar, perimeter: g.perimeter, extent: g.extent });
+  }
+  res.planarHoles = planar; res.nonPlanarHoles = nonPlanar; res.holes = holes; res.brokenLoops = broken;
+  // degenerate & duplicate
+  const dg = classifyDegenerate(mesh, tol);
+  const degList = []; for (let i = 0; i < dg.needles.length; i += 3) degList.push(dg.needles[i]); for (let i = 0; i < dg.caps.length; i += 2) degList.push(dg.caps[i]);
+  res.degenerateFaces = degList.length; res.degenerateFaceList = Uint32Array.from(degList);
+  const dup = findDuplicates(mesh);
+  res.duplicateFaces = dup.count; res.duplicateFaceList = Uint32Array.from(dup.remove);
+  // components & orientation
+  const comps = faceComponents(mesh, topo.opp);
+  const { flip, conflicts } = orientationFlips(mesh, topo.opp);
+  const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, flip, ctx.storedNormals || null, !!ctx.quick);
+  const inv = []; let invCount = 0;
+  for (let f = 0; f < nf; f++) { if (dead[f] || comps.comp[f] < 0) continue; if ((flip[f] ^ co.compFlip[comps.comp[f]]) & 1) { invCount++; if (inv.length < 2000000) inv.push(f); } }
+  res.invertedNormals = invCount; res.invertedFaceList = Uint32Array.from(inv); res.orientationConflicts = conflicts;
+  res.shells = comps.count; res.disjointShells = Math.max(0, comps.count - 1);
+  // shell details
+  const shellInfo = [];
+  for (let c = 0; c < comps.count; c++) shellInfo.push({ faces: comps.sizes[c], closed: !!co.closed[c], volume: Math.abs(co.vol[c]) / 6, depth: co.depth[c] });
+  shellInfo.sort((a, b) => b.faces - a.faces);
+  res.shellInfo = shellInfo;
+  // normal mismatches vs stored normals
+  let mismatches = 0;
+  if (ctx.storedNormals) {
+    const n = [0, 0, 0]; const sn = ctx.storedNormals;
+    for (let f = 0; f < nf; f++) {
+      if (dead[f] || mesh.src[f] < 0) continue; const s = mesh.src[f] * 3;
+      const sl = sn[s] * sn[s] + sn[s + 1] * sn[s + 1] + sn[s + 2] * sn[s + 2]; if (sl < 1e-12) continue;
+      faceNormalInto(V, F, f, n);
+      if (n[0] * sn[s] + n[1] * sn[s + 1] + n[2] * sn[s + 2] < -1e-6) mismatches++;
+    }
+  }
+  res.normalMismatches = mismatches;
+  // stats
+  let area = 0, vol6 = 0; const nn = [0, 0, 0]; let alive = 0;
+  for (let f = 0; f < nf; f++) { if (dead[f]) continue; alive++; area += faceNormalInto(V, F, f, nn); vol6 += det3(V, F[f * 3], F[f * 3 + 1], F[f * 3 + 2]); }
+  let closedShells = 0, absVol = 0; for (let c = 0; c < comps.count; c++) if (co.closed[c]) { closedShells++; absVol += Math.abs(co.vol[c]) / 6; }
+  const usedV = new Uint8Array(mesh.nv); let nvUsed = 0; for (let f = 0; f < nf; f++) { if (dead[f]) continue; for (let k = 0; k < 3; k++) usedV[F[f * 3 + k]] = 1; } for (let v = 0; v < mesh.nv; v++) if (usedV[v]) nvUsed++;
+  const bb = bbox(V, mesh.nv);
+  const watertight = res.nakedEdges === 0 && res.nonManifoldEdges === 0;
+  let genus = null;
+  if (watertight && res.degenerateFaces === 0) { const chi = nvUsed - topo.ne + alive; genus = comps.count - chi / 2; }
+  res.stats = { vertices: nvUsed, triangles: alive, edges: topo.ne, bbox: bb, area, volume: absVol, signedVolume: vol6 / 6, watertight, manifold: res.nonManifoldEdges === 0 && conflicts === 0, closedShells, genus };
+  if (!ctx.quick && ctx.selfIntersections !== false && alive <= (ctx.siMaxFaces || 3000000)) {
+    const si = findSelfIntersections(mesh, 200000);
+    res.selfIntersections = si.pairs; res.selfIntersectingFaces = si.faces; res.selfIntersectionsTruncated = !!si.truncated;
+  } else { res.selfIntersections = null; res.selfIntersectingFaces = new Uint32Array(0); }
+  res.clean = res.nakedEdges === 0 && res.nonManifoldEdges === 0 && res.invertedNormals === 0 && res.duplicateFaces === 0 && res.degenerateFaces === 0 && conflicts === 0;
+  res.printable = res.nakedEdges === 0 && res.nonManifoldEdges === 0 && res.invertedNormals === 0 && res.duplicateFaces === 0 && conflicts === 0;
+  return res;
+}
+
+/* ------------------------------------------------------------------ repair */
+const DEFAULTS = {
+  tolerance: 1e-5,          // relative to bbox diagonal (gap closing of boundary vertices)
+  fillHoles: true,
+  maxHoleEdges: 0,          // 0 = unlimited
+  removeZeroVolumeShells: true,
+  removeSmallShells: false,
+  smallShellFraction: 0.001, // of largest shell volume
+  smallShellMaxFaces: 0,     // 0 = ignore face count criterion
+  maxIterations: 12,
+  cavities: true,           // enclosed closed shells are oriented inward (even-odd rule); false = every shell outward
+  checkSelfIntersections: true,
+  selfIntersectionMaxFaces: 3000000,
+  solidify: false,          // rebuild the result as one voxel-classified solid (removes self-intersections, unions shells)
+  solidifyResolution: 200,  // voxels along the longest axis
+};
+
+function repair(parsed, options, progress) {
+  const opts = Object.assign({}, DEFAULTS, options || {});
+  const log = [];
+  const t0 = now();
+  const say = (s, cls) => log.push({ t: s, c: cls || '' });
+  let lastStage = 'start', lastT = now();
+  const prog = (stage, frac) => { const t = now(); if (opts.trace) opts.trace.push(`   ${lastStage}: ${(t - lastT).toFixed(0)} ms`); lastStage = stage; lastT = t; if (progress) progress(stage, frac); };
+  const count = parsed.count;
+  prog('Welding vertices', 0.02);
+  let mesh = weldExact(parsed.tris, count);
+  const bb0 = bbox(mesh.V, mesh.nv);
+  const diag = bb0.diag || 1;
+  // float32 coordinates carry ~7 significant digits: anything thinner than a few ulps of the model size is numerically zero
+  let maxAbs = 0; for (let i = 0; i < mesh.nv * 3; i++) { const a = Math.abs(mesh.V[i]); if (a > maxAbs) maxAbs = a; }
+  const degTol = Math.max(4e-7 * Math.max(maxAbs, diag), 1e-12);
+  const tol = Math.max(opts.tolerance * diag, 0);
+  const ctx = { tol: degTol, storedNormals: parsed.normals || null, diag, selfIntersections: opts.checkSelfIntersections, siMaxFaces: opts.selfIntersectionMaxFaces };
+  prog('Analyzing', 0.08);
+  let topo = buildTopology(mesh);
+  const before = analyze(mesh, topo, ctx);
+  const snapBefore = mesh.snapshot();
+  const rawRefs = count * 3;
+  say(`Welded ${fmtInt(rawRefs)} vertex references into ${fmtInt(mesh.nv)} unique vertices`);
+  const actions = [];
+  const rebuild = () => { mesh.compact(); topo = buildTopology(mesh); };
+  let iter = 0, lastScore = Infinity, lastSig = '';
+  let cur = before;
+  const signature = () => Object.values(totals).join('|') + '|' + mesh.alive() + '|' + mesh.nv;
+  const score = (a) => a.nakedEdges + 2 * a.nonManifoldEdges + a.duplicateFaces + a.orientationConflicts + (a.degenerateFaces ? 1 : 0);
+  const totals = { welded: 0, needles: 0, caps: 0, collinearLoops: 0, folds: 0, sliverFlips: 0, sliverCollapses: 0, duplicates: 0, cancelled: 0, fins: 0, splitVerts: 0, flipped: 0, tjunctions: 0, holes: 0, islands: 0, skippedHoles: 0, brokenLoops: 0, zeroShells: 0, smallShells: 0, removedShellFaces: 0 };
+  while (iter < opts.maxIterations) {
+    iter++;
+    if (cur.clean || (cur.printable && iter > 1)) break;
+    // keep going while a pass still changes something; stop when an iteration changed nothing
+    const sig = signature(); if (iter > 1 && sig === lastSig) break; lastSig = sig;
+    const sc = score(cur); if (iter > 4 && sc > lastScore) break; lastScore = Math.min(lastScore, sc);
+    const base = 0.1 + 0.7 * ((iter - 1) / opts.maxIterations);
+    const step = 0.7 / opts.maxIterations;
+    // 1. gap closing on boundary vertices
+    if (tol > 0 && cur.nakedEdges > 0) {
+      prog('Closing gaps', base + step * 0.05);
+      const isB = new Uint8Array(mesh.nv);
+      for (const e of topo.nakedEdges) { isB[topo.eLo[e]] = 1; isB[topo.eHi[e]] = 1; }
+      for (const e of topo.nmEdges) { isB[topo.eLo[e]] = 1; isB[topo.eHi[e]] = 1; }
+      const bv = []; for (let v = 0; v < mesh.nv; v++) if (isB[v]) bv.push(v);
+      const merged = weldTolerance(mesh, Uint32Array.from(bv), tol);
+      if (merged) { totals.welded += merged; say(`Closed ${fmtInt(merged)} micro-gaps (merged boundary vertices within ${fmtTol(tol)})`); rebuild(); }
+    }
+    // 2. degenerate faces
+    prog('Removing degenerate faces', base + step * 0.15);
+    const weldBoundary = () => {
+      if (!(tol > 0) || !topo.nakedEdges.length) return 0;
+      const isB = new Uint8Array(mesh.nv);
+      for (const e of topo.nakedEdges) { isB[topo.eLo[e]] = 1; isB[topo.eHi[e]] = 1; }
+      const bv = []; for (let v = 0; v < mesh.nv; v++) if (isB[v]) bv.push(v);
+      const merged = weldTolerance(mesh, Uint32Array.from(bv), tol);
+      if (merged) { totals.welded += merged; rebuild(); }
+      return merged;
+    };
+    const cleanDegenerate = () => {
+      let changed = false, prevCount = Infinity;
+      for (let pass = 0; pass < 5; pass++) {
+        const dg = classifyDegenerate(mesh, degTol);
+        const capsNow = [];
+        if (iter === 1) for (let i = 0; i < dg.caps.length; i += 2) if (!(mesh.flags[dg.caps[i]] & FLAG_FILL)) capsNow.push(dg.caps[i], dg.caps[i + 1]);
+        const count = dg.needles.length / 3 + capsNow.length / 2;
+        if (!count || count >= prevCount) break;
+        prevCount = count;
+        if (dg.needles.length) { collapseNeedles(mesh, dg.needles); totals.needles += dg.needles.length / 3; }
+        const nCaps = capsNow.length ? removeCaps(mesh, capsNow) : 0; totals.caps += nCaps;
+        rebuild(); changed = true;
+        if (nCaps) {
+          // removed slivers expose collinear gaps: weld coincident ends and stitch the T-junctions right away
+          weldBoundary();
+          const n = fixTJunctions(mesh, topo, Math.max(tol, degTol * 4), Math.max(tol, degTol));
+          if (n) { totals.tjunctions += n; rebuild(); }
+        }
+      }
+      return changed;
+    };
+    cleanDegenerate();
+    // 3. duplicate faces
+    prog('Removing duplicate faces', base + step * 0.3);
+    {
+      const dup = findDuplicates(mesh, iter === 1, topo);
+      if (dup.remove.length) { for (const f of dup.remove) mesh.killFace(f); totals.duplicates += dup.count; totals.cancelled += dup.cancelled; rebuild(); }
+    }
+    // 4. non-manifold edges
+    if (topo.nmEdges.length) {
+      prog('Resolving non-manifold edges', base + step * 0.4);
+      const comps = faceComponents(mesh, topo.opp);
+      const r = fixNonManifold(mesh, topo, comps.comp, iter);
+      totals.fins += r.removed; totals.splitVerts += r.split;
+      rebuild();
+    }
+    // 5. winding consistency
+    prog('Fixing winding', base + step * 0.5);
+    {
+      const { flip, conflicts, conflictSlots } = orientationFlips(mesh, topo.opp);
+      const n = applyFlips(mesh, flip, null, null);
+      if (n) { totals.flipped += n; rebuild(); }
+      if (conflicts) {
+        // a face that cannot agree with its neighbours sits on a fold; remove the face on the far side of each conflicting edge
+        let cut = 0;
+        for (const s of conflictSlots) {
+          const o = topo.opp[s]; if (o < 0) continue;
+          const g = (s / 3) | 0, h = (o / 3) | 0;
+          let victim = h;
+          if ((mesh.flags[h] & FLAG_FILL) && !(mesh.flags[g] & FLAG_FILL)) victim = g;
+          if (!mesh.dead[victim]) { mesh.killFace(victim); cut++; }
+        }
+        if (cut) { totals.folds += cut; rebuild(); }
+      }
+    }
+    // 6. T-junctions
+    if (topo.nakedEdges.length) {
+      prog('Stitching T-junctions', base + step * 0.6);
+      const n = fixTJunctions(mesh, topo, Math.max(tol, degTol * 4), Math.max(tol, degTol));
+      if (n) { totals.tjunctions += n; rebuild(); }
+    }
+    // 7. holes
+    if (opts.fillHoles && topo.nakedEdges.length) {
+      prog('Filling holes', base + step * 0.7);
+      const info = {};
+      const n = fillHoles(mesh, topo, opts, degTol, info, Math.max(tol, degTol * 4));
+      totals.holes += n; totals.islands += info.islands || 0; totals.skippedHoles += info.skipped || 0; totals.brokenLoops = info.brokenLoops || 0; totals.collinearLoops = info.collinear || 0;
+      if (n) rebuild();
+      // fills may introduce degenerate/duplicate faces: clean again (caps are closed by stitching in the next iteration)
+      cleanDegenerate();
+      const dup = findDuplicates(mesh, false, topo);
+      if (dup.remove.length) { for (const f of dup.remove) mesh.killFace(f); totals.duplicates += dup.count; rebuild(); }
+    }
+    // 7c. thin slivers left by stitching and filling
+    {
+      const r = removeSlivers(mesh, degTol, diag, 6);
+      if (r.flips || r.collapses) { totals.sliverFlips += r.flips; totals.sliverCollapses += r.collapses; rebuild(); const dup = findDuplicates(mesh, false, topo); if (dup.remove.length) { for (const f of dup.remove) mesh.killFace(f); totals.duplicates += dup.count; rebuild(); } }
+    }
+    prog('Verifying', base + step * 0.9);
+    cur = analyze(mesh, topo, Object.assign({ quick: true }, ctx));
+    if (opts.trace) opts.trace.push(`iter ${iter}: naked=${cur.nakedEdges} nm=${cur.nonManifoldEdges} holes=${cur.planarHoles + cur.nonPlanarHoles} inv=${cur.invertedNormals} dup=${cur.duplicateFaces} deg=${cur.degenerateFaces} shells=${cur.shells} conflicts=${cur.orientationConflicts} T=${mesh.alive()} | needles=${totals.needles} caps=${totals.caps} dup=${totals.duplicates}/${totals.cancelled} fins=${totals.fins} split=${totals.splitVerts} tj=${totals.tjunctions} holes=${totals.holes} flipped=${totals.flipped}`);
+  }
+  // 8. global orientation with cavities
+  prog('Orienting shells', 0.84);
+  {
+    const comps = faceComponents(mesh, topo.opp);
+    const { flip } = orientationFlips(mesh, topo.opp);
+    const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, flip, ctx.storedNormals, !opts.cavities);
+    const n = applyFlips(mesh, flip, co.compFlip, comps.comp);
+    if (n) { totals.flipped += n; rebuild(); }
+    let cav = 0; for (let c = 0; c < comps.count; c++) if (co.closed[c] && (co.depth[c] & 1)) cav++;
+    if (cav) say(`${cav} inner shell${cav > 1 ? 's' : ''} kept as cavit${cav > 1 ? 'ies' : 'y'} (normals pointing inward)`);
+  }
+  // 9. shell cleanup
+  prog('Cleaning shells', 0.9);
+  {
+    const comps = faceComponents(mesh, topo.opp);
+    const flip0 = new Uint8Array(mesh.nf);
+    const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, flip0, null);
+    let maxVol = 0; for (let c = 0; c < comps.count; c++) if (co.closed[c]) maxVol = Math.max(maxVol, Math.abs(co.vol[c]) / 6);
+    const kill = new Uint8Array(comps.count); let zero = 0, small = 0;
+    for (let c = 0; c < comps.count; c++) {
+      const vol = Math.abs(co.vol[c]) / 6;
+      // a double-sided sheet has (almost) no volume for its surface area; a real thin part still has some
+      const zeroVol = vol < 1e-4 * Math.pow(co.area[c], 1.5);
+      if (opts.removeZeroVolumeShells && co.closed[c] && zeroVol && comps.count > 1) { kill[c] = 1; zero++; continue; }
+      if (opts.removeSmallShells && comps.count > 1) {
+        const byVol = co.closed[c] && maxVol > 0 && vol < opts.smallShellFraction * maxVol;
+        const byFaces = opts.smallShellMaxFaces > 0 && comps.sizes[c] < opts.smallShellMaxFaces;
+        if ((byVol || byFaces) && vol < maxVol) { kill[c] = 1; small++; }
+      }
+    }
+    if (zero + small) {
+      let rf = 0;
+      for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f] && kill[comps.comp[f]]) { mesh.killFace(f); rf++; }
+      totals.zeroShells = zero; totals.smallShells = small; totals.removedShellFaces = rf; rebuild();
+    }
+  }
+  mesh.removeUnusedVertices();
+  rebuild();
+  let solidInfo = null;
+  if (opts.solidify && mesh.alive() > 0) {
+    prog('Rebuilding as solid', 0.86);
+    const sol = solidify(mesh, opts.solidifyResolution, (stage, frac) => prog(stage, 0.86 + frac * 0.08));
+    if (sol.mesh.nf > 0) {
+      const soup = new Float32Array(sol.mesh.nf * 9);
+      for (let f = 0; f < sol.mesh.nf; f++) for (let c = 0; c < 3; c++) { const v = sol.mesh.F[f * 3 + c] * 3; soup[f * 9 + c * 3] = sol.mesh.V[v]; soup[f * 9 + c * 3 + 1] = sol.mesh.V[v + 1]; soup[f * 9 + c * 3 + 2] = sol.mesh.V[v + 2]; }
+      const inner = repair({ tris: soup, normals: null, count: sol.mesh.nf, format: 'solid', header: '' }, Object.assign({}, opts, { solidify: false, trace: null, checkSelfIntersections: false }), null);
+      const snap = inner.repaired;
+      mesh = new Mesh(Math.max(4, snap.nv), Math.max(4, snap.nf));
+      mesh.V = Float64Array.from(snap.V); mesh.nv = snap.nv; mesh.F = Uint32Array.from(snap.F); mesh.nf = snap.nf;
+      mesh.src = new Int32Array(Math.max(1, snap.nf)).fill(-1); mesh.flags = new Uint8Array(Math.max(1, snap.nf)); mesh.dead = new Uint8Array(Math.max(1, snap.nf)); mesh.ndead = 0;
+      rebuild();
+      solidInfo = { resolution: sol.resolution, voxel: sol.voxel, triangles: snap.nf, innerLog: inner.log };
+    }
+  }
+  prog('Final check', 0.95);
+  const after = analyze(mesh, topo, Object.assign({ quick: !opts.cavities }, ctx));
+  const snapAfter = mesh.snapshot();
+  // narrative log
+  if (totals.needles) say(`Collapsed ${fmtInt(totals.needles)} needle-thin degenerate face${totals.needles === 1 ? '' : 's'}`);
+  if (totals.caps) say(`Removed ${fmtInt(totals.caps)} zero-height (collinear) face${totals.caps === 1 ? '' : 's'} and stitched the gaps`);
+  if (totals.duplicates) say(`Removed ${fmtInt(totals.duplicates)} duplicate face${totals.duplicates === 1 ? '' : 's'}${totals.cancelled ? ` (${fmtInt(totals.cancelled)} cancelled as opposite-facing pairs)` : ''}`);
+  if (totals.fins) say(`Removed ${fmtInt(totals.fins)} dangling fin / internal wall face${totals.fins === 1 ? '' : 's'} at non-manifold edges`);
+  if (totals.splitVerts) say(`Split ${fmtInt(totals.splitVerts)} non-manifold vert${totals.splitVerts === 1 ? 'ex' : 'ices'} into separate shells`);
+  if (totals.tjunctions) say(`Stitched ${fmtInt(totals.tjunctions)} T-junction${totals.tjunctions === 1 ? '' : 's'}`);
+  if (totals.holes) say(`Filled ${fmtInt(totals.holes)} hole${totals.holes === 1 ? '' : 's'}${totals.islands ? ` (${totals.islands} with islands kept open)` : ''}`);
+  if (totals.skippedHoles) say(`Left ${fmtInt(totals.skippedHoles)} hole${totals.skippedHoles === 1 ? '' : 's'} open (larger than the hole size limit)`, 'warn');
+  if (totals.brokenLoops) say(`${fmtInt(totals.brokenLoops)} boundary loop${totals.brokenLoops === 1 ? '' : 's'} could not be closed`, 'warn');
+  if (totals.sliverFlips || totals.sliverCollapses) say(`Reshaped ${fmtInt(totals.sliverFlips + totals.sliverCollapses)} hairline sliver${totals.sliverFlips + totals.sliverCollapses === 1 ? '' : 's'} (${fmtInt(totals.sliverFlips)} edge flips, ${fmtInt(totals.sliverCollapses)} collapses)`);
+  if (totals.flipped) say(`Flipped ${fmtInt(totals.flipped)} inverted face${totals.flipped === 1 ? '' : 's'}`);
+  if (totals.folds) say(`Cut ${fmtInt(totals.folds)} face${totals.folds === 1 ? '' : 's'} at non-orientable folds and refilled`);
+  if (after.degenerateFaces && after.stats.watertight) say(`${fmtInt(after.degenerateFaces)} hairline sliver face${after.degenerateFaces === 1 ? '' : 's'} left in place (thinner than float precision, topology is intact)`, 'warn');
+  if (totals.zeroShells) say(`Removed ${totals.zeroShells} zero-volume shell${totals.zeroShells === 1 ? '' : 's'}`);
+  if (totals.smallShells) say(`Removed ${totals.smallShells} small floating shell${totals.smallShells === 1 ? '' : 's'} (${fmtInt(totals.removedShellFaces)} faces)`);
+  if (solidInfo) {
+    say(`Rebuilt as one solid at ${solidInfo.resolution} voxels (${fmtTol(solidInfo.voxel)} units per voxel): ${fmtInt(after.stats.triangles)} triangles, ${after.shells} shell${after.shells === 1 ? '' : 's'}`);
+    for (const l of solidInfo.innerLog) if (!/^Welded|^Flipped/.test(l.t)) say('    ' + l.t, l.c);
+  }
+  const ms = now() - t0;
+  prog('Done', 1);
+  return {
+    before, after, log, totals, iterations: iter, ms, diag, tolerance: tol, solid: solidInfo ? { resolution: solidInfo.resolution, voxel: solidInfo.voxel } : null,
+    original: snapBefore, repaired: snapAfter,
+    counts: { rawTriangles: count, vertsBefore: before.stats.vertices, vertsAfter: after.stats.vertices, trisBefore: before.stats.triangles, trisAfter: after.stats.triangles },
+    format: parsed.format, header: parsed.header, invalidValues: parsed.invalidValues || 0,
+  };
+}
+
+function fmtTol(t) { if (t >= 1) return t.toFixed(3); if (t >= 1e-3) return t.toFixed(4); return t.toExponential(2); }
+function now() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
+
+/* ----------------------------------------------------------- vertex->faces */
+function vertexFaces(mesh) {
+  const nf = mesh.nf, F = mesh.F, dead = mesh.dead, nv = mesh.nv;
+  const start = new Int32Array(nv + 1);
+  for (let f = 0; f < nf; f++) { if (dead[f]) continue; start[F[f * 3] + 1]++; start[F[f * 3 + 1] + 1]++; start[F[f * 3 + 2] + 1]++; }
+  for (let v = 0; v < nv; v++) start[v + 1] += start[v];
+  const items = new Int32Array(start[nv]); const fill = start.slice(0, nv);
+  for (let f = 0; f < nf; f++) { if (dead[f]) continue; items[fill[F[f * 3]]++] = f; items[fill[F[f * 3 + 1]]++] = f; items[fill[F[f * 3 + 2]]++] = f; }
+  return { start, items };
+}
+function minAltitude(V, a, b, c) {
+  const ax = V[a * 3], ay = V[a * 3 + 1], az = V[a * 3 + 2], bx = V[b * 3], by = V[b * 3 + 1], bz = V[b * 3 + 2], cx = V[c * 3], cy = V[c * 3 + 1], cz = V[c * 3 + 2];
+  const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+  const area2 = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+  const longest = Math.max(Math.hypot(ux, uy, uz), Math.hypot(vx, vy, vz), Math.hypot(cx - bx, cy - by, cz - bz));
+  return longest > 0 ? area2 / longest : 0;
+}
+
+/* ----------------------------------------------------------- sliver removal */
+/* Final pass for thin faces that survived the main loop: flip the long edge of a
+   collinear face into its neighbour (this is what a T-junction split does, applied
+   where it can improve the shape), or collapse a very short edge when no face folds. */
+function removeSlivers(mesh, degTol, diag, maxRounds) {
+  let flips = 0, collapses = 0;
+  const collapseTol = Math.max(degTol * 4, 1e-3 * diag);   // a collapse moves one vertex by at most this much
+  const gentleTol = Math.max(degTol * 4, 1e-4 * diag);
+  const nrm = [0, 0, 0];
+  for (let round = 0; round < maxRounds; round++) {
+    mesh.compact();
+    const topo = buildTopology(mesh);
+    const dg = classifyDegenerate(mesh, degTol);
+    if (!dg.needles.length && !dg.caps.length) break;
+    if (dg.needles.length) { collapseNeedles(mesh, dg.needles); collapses += dg.needles.length / 3; continue; }
+    const F = mesh.F, V = mesh.V;
+    const touched = new Uint8Array(mesh.nf);
+    let progress = 0;
+    const adj = vertexFaces(mesh);
+    const faceNormal = (f, out) => faceNormalInto(V, F, f, out);
+    for (let i = 0; i < dg.caps.length; i += 2) {
+      const f = dg.caps[i], k = dg.caps[i + 1];
+      if (mesh.dead[f] || touched[f]) continue;
+      const a = F[f * 3 + k], b = F[f * 3 + (k === 2 ? 0 : k + 1)], c = F[f * 3 + (k === 0 ? 2 : k - 1)];
+      const h0 = minAltitude(V, a, b, c);
+      const s = f * 3 + k, o = topo.opp[s];
+      let done = false;
+      if (o >= 0) {
+        const g = (o / 3) | 0, ok2 = o % 3;
+        if (!mesh.dead[g] && !touched[g]) {
+          const d = F[g * 3 + (ok2 === 0 ? 2 : ok2 - 1)];
+          if (d !== c && topo.findEdge(c, d) < 0) {
+            const h1 = minAltitude(V, b, c, d), h2 = minAltitude(V, c, a, d);
+            const hm = Math.min(h1, h2);
+            if (hm >= degTol || hm > 2 * h0) {
+              touched[f] = 1; touched[g] = 1; mesh.killFace(f); splitFaceEdge(mesh, g, ok2, [c]); flips++; progress++; done = true;
+            }
+          }
+        }
+      }
+      if (done) continue;
+      // collapse the shorter of the apex edges if it is tiny and no neighbour folds
+      const lac = Math.hypot(V[c * 3] - V[a * 3], V[c * 3 + 1] - V[a * 3 + 1], V[c * 3 + 2] - V[a * 3 + 2]);
+      const lcb = Math.hypot(V[c * 3] - V[b * 3], V[c * 3 + 1] - V[b * 3 + 1], V[c * 3 + 2] - V[b * 3 + 2]);
+      const w = lac < lcb ? a : b, L = Math.min(lac, lcb);
+      if (L >= collapseTol) continue;
+      let ok = true; const before = [0, 0, 0];
+      // link condition: the only vertices adjacent to both c and w may be the apexes of the faces on edge (c,w)
+      {
+        const nbC = new Set(), apex = new Set();
+        for (let j = adj.start[c]; j < adj.start[c + 1]; j++) { const g = adj.items[j]; if (mesh.dead[g]) continue; const g0 = F[g * 3], g1 = F[g * 3 + 1], g2 = F[g * 3 + 2]; const hasW = g0 === w || g1 === w || g2 === w; for (const x of [g0, g1, g2]) { if (x === c || x === w) continue; if (hasW) apex.add(x); else nbC.add(x); } }
+        for (const x of nbC) if (!apex.has(x) && topo.findEdge(w, x) >= 0) { ok = false; break; }
+      }
+      if (!ok) continue;
+      for (let j = adj.start[c]; j < adj.start[c + 1] && ok; j++) {
+        const g = adj.items[j]; if (mesh.dead[g] || touched[g]) { if (touched[g]) ok = false; continue; }
+        const g0 = F[g * 3], g1 = F[g * 3 + 1], g2 = F[g * 3 + 2];
+        if (g0 === w || g1 === w || g2 === w) continue; // dies with the collapse
+        if (minAltitude(V, g0, g1, g2) < 4 * degTol) continue; // itself a sliver: no reliable normal to compare
+        faceNormal(g, before);
+        const n0 = g0 === c ? w : g0, n1 = g1 === c ? w : g1, n2 = g2 === c ? w : g2;
+        // normal after
+        const ux = V[n1 * 3] - V[n0 * 3], uy = V[n1 * 3 + 1] - V[n0 * 3 + 1], uz = V[n1 * 3 + 2] - V[n0 * 3 + 2];
+        const vx = V[n2 * 3] - V[n0 * 3], vy = V[n2 * 3 + 1] - V[n0 * 3 + 1], vz = V[n2 * 3 + 2] - V[n0 * 3 + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const nl = Math.hypot(nx, ny, nz);
+        if (nl > 0 && (nx * before[0] + ny * before[1] + nz * before[2]) / nl < (L > gentleTol ? 0.7 : 0.2)) ok = false;
+      }
+      if (!ok) continue;
+      for (let j = adj.start[c]; j < adj.start[c + 1]; j++) {
+        const g = adj.items[j]; if (mesh.dead[g]) continue;
+        for (let q = 0; q < 3; q++) if (F[g * 3 + q] === c) F[g * 3 + q] = w;
+        touched[g] = 1;
+        if (F[g * 3] === F[g * 3 + 1] || F[g * 3 + 1] === F[g * 3 + 2] || F[g * 3] === F[g * 3 + 2]) mesh.killFace(g);
+      }
+      collapses++; progress++;
+    }
+    if (!progress) break;
+  }
+  mesh.compact();
+  return { flips, collapses };
+}
+
+/* ------------------------------------------------------ self-intersections */
+function triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps) {
+  const p = (i, k) => V[i * 3 + k];
+  // plane of B
+  let e1x = p(b1, 0) - p(b0, 0), e1y = p(b1, 1) - p(b0, 1), e1z = p(b1, 2) - p(b0, 2);
+  let e2x = p(b2, 0) - p(b0, 0), e2y = p(b2, 1) - p(b0, 1), e2z = p(b2, 2) - p(b0, 2);
+  const n2x = e1y * e2z - e1z * e2y, n2y = e1z * e2x - e1x * e2z, n2z = e1x * e2y - e1y * e2x;
+  const n2l = Math.hypot(n2x, n2y, n2z); if (n2l === 0) return false;
+  const d2 = -(n2x * p(b0, 0) + n2y * p(b0, 1) + n2z * p(b0, 2));
+  const tol2 = eps * n2l;
+  let da0 = n2x * p(a0, 0) + n2y * p(a0, 1) + n2z * p(a0, 2) + d2; if (Math.abs(da0) < tol2) da0 = 0;
+  let da1 = n2x * p(a1, 0) + n2y * p(a1, 1) + n2z * p(a1, 2) + d2; if (Math.abs(da1) < tol2) da1 = 0;
+  let da2 = n2x * p(a2, 0) + n2y * p(a2, 1) + n2z * p(a2, 2) + d2; if (Math.abs(da2) < tol2) da2 = 0;
+  if ((da0 > 0 && da1 > 0 && da2 > 0) || (da0 < 0 && da1 < 0 && da2 < 0)) return false;
+  if (da0 === 0 && da1 === 0 && da2 === 0) return false; // coplanar: ignored
+  // plane of A
+  e1x = p(a1, 0) - p(a0, 0); e1y = p(a1, 1) - p(a0, 1); e1z = p(a1, 2) - p(a0, 2);
+  e2x = p(a2, 0) - p(a0, 0); e2y = p(a2, 1) - p(a0, 1); e2z = p(a2, 2) - p(a0, 2);
+  const n1x = e1y * e2z - e1z * e2y, n1y = e1z * e2x - e1x * e2z, n1z = e1x * e2y - e1y * e2x;
+  const n1l = Math.hypot(n1x, n1y, n1z); if (n1l === 0) return false;
+  const d1 = -(n1x * p(a0, 0) + n1y * p(a0, 1) + n1z * p(a0, 2));
+  const tol1 = eps * n1l;
+  let db0 = n1x * p(b0, 0) + n1y * p(b0, 1) + n1z * p(b0, 2) + d1; if (Math.abs(db0) < tol1) db0 = 0;
+  let db1 = n1x * p(b1, 0) + n1y * p(b1, 1) + n1z * p(b1, 2) + d1; if (Math.abs(db1) < tol1) db1 = 0;
+  let db2 = n1x * p(b2, 0) + n1y * p(b2, 1) + n1z * p(b2, 2) + d1; if (Math.abs(db2) < tol1) db2 = 0;
+  if ((db0 > 0 && db1 > 0 && db2 > 0) || (db0 < 0 && db1 < 0 && db2 < 0)) return false;
+  // intersection line direction, pick the dominant axis
+  const Dx = n1y * n2z - n1z * n2y, Dy = n1z * n2x - n1x * n2z, Dz = n1x * n2y - n1y * n2x;
+  let axis = 0, m = Math.abs(Dx); if (Math.abs(Dy) > m) { m = Math.abs(Dy); axis = 1; } if (Math.abs(Dz) > m) axis = 2;
+  const iv = (vp0, vp1, vp2, d0, d1, d2) => {
+    if (d0 * d1 > 0) return [vp2 + (vp0 - vp2) * d2 / (d2 - d0), vp2 + (vp1 - vp2) * d2 / (d2 - d1)];
+    if (d0 * d2 > 0) return [vp1 + (vp0 - vp1) * d1 / (d1 - d0), vp1 + (vp2 - vp1) * d1 / (d1 - d2)];
+    if (d1 * d2 > 0 || d0 !== 0) return [vp0 + (vp1 - vp0) * d0 / (d0 - d1), vp0 + (vp2 - vp0) * d0 / (d0 - d2)];
+    if (d1 !== 0) return [vp1 + (vp0 - vp1) * d1 / (d1 - d0), vp1 + (vp2 - vp1) * d1 / (d1 - d2)];
+    if (d2 !== 0) return [vp2 + (vp0 - vp2) * d2 / (d2 - d0), vp2 + (vp1 - vp2) * d2 / (d2 - d1)];
+    return null;
+  };
+  const ia = iv(p(a0, axis), p(a1, axis), p(a2, axis), da0, da1, da2); if (!ia) return false;
+  const ib = iv(p(b0, axis), p(b1, axis), p(b2, axis), db0, db1, db2); if (!ib) return false;
+  const a_lo = Math.min(ia[0], ia[1]), a_hi = Math.max(ia[0], ia[1]), b_lo = Math.min(ib[0], ib[1]), b_hi = Math.max(ib[0], ib[1]);
+  return Math.max(a_lo, b_lo) < Math.min(a_hi, b_hi) - eps;
+}
+
+function findSelfIntersections(mesh, maxList) {
+  const nf = mesh.nf, F = mesh.F, V = mesh.V, dead = mesh.dead;
+  let alive = 0; const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  const fb = new Float64Array(nf * 6);
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue; alive++;
+    for (let k = 0; k < 3; k++) { fb[f * 6 + k] = Infinity; fb[f * 6 + 3 + k] = -Infinity; }
+    for (let c = 0; c < 3; c++) { const v = F[f * 3 + c] * 3; for (let k = 0; k < 3; k++) { const x = V[v + k]; if (x < fb[f * 6 + k]) fb[f * 6 + k] = x; if (x > fb[f * 6 + 3 + k]) fb[f * 6 + 3 + k] = x; } }
+    for (let k = 0; k < 3; k++) { if (fb[f * 6 + k] < mn[k]) mn[k] = fb[f * 6 + k]; if (fb[f * 6 + 3 + k] > mx[k]) mx[k] = fb[f * 6 + 3 + k]; }
+  }
+  if (alive < 2) return { pairs: 0, faces: new Uint32Array(0) };
+  const ex = [Math.max(mx[0] - mn[0], 1e-9), Math.max(mx[1] - mn[1], 1e-9), Math.max(mx[2] - mn[2], 1e-9)];
+  const diag = Math.hypot(ex[0], ex[1], ex[2]);
+  const targetCells = Math.max(1, alive / 3);
+  const base = Math.cbrt(targetCells / (ex[0] * ex[1] * ex[2]));
+  const res = [0, 1, 2].map((k) => Math.max(1, Math.min(200, Math.ceil(ex[k] * base))));
+  const hs = [ex[0] / res[0], ex[1] / res[1], ex[2] / res[2]];
+  const cellOf = (x, k) => { let c = Math.floor((x - mn[k]) / hs[k]); if (c < 0) c = 0; if (c >= res[k]) c = res[k] - 1; return c; };
+  const ncell = res[0] * res[1] * res[2];
+  const count = new Int32Array(ncell + 1);
+  const lo = new Int32Array(nf * 3), hi = new Int32Array(nf * 3);
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue;
+    for (let k = 0; k < 3; k++) { lo[f * 3 + k] = cellOf(fb[f * 6 + k], k); hi[f * 3 + k] = cellOf(fb[f * 6 + 3 + k], k); }
+    for (let i = lo[f * 3]; i <= hi[f * 3]; i++) for (let j = lo[f * 3 + 1]; j <= hi[f * 3 + 1]; j++) for (let k = lo[f * 3 + 2]; k <= hi[f * 3 + 2]; k++) count[(i * res[1] + j) * res[2] + k + 1]++;
+  }
+  for (let c = 0; c < ncell; c++) count[c + 1] += count[c];
+  const items = new Int32Array(count[ncell]); const fill = count.slice(0, ncell);
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue;
+    for (let i = lo[f * 3]; i <= hi[f * 3]; i++) for (let j = lo[f * 3 + 1]; j <= hi[f * 3 + 1]; j++) for (let k = lo[f * 3 + 2]; k <= hi[f * 3 + 2]; k++) items[fill[(i * res[1] + j) * res[2] + k]++] = f;
+  }
+  const eps = 1e-9 * diag;
+  const hit = new Uint8Array(nf); let pairs = 0; let budget = 6e7;
+  for (let c = 0; c < ncell && budget > 0; c++) {
+    const ci = (c / (res[1] * res[2])) | 0, cj = ((c / res[2]) | 0) % res[1], ck = c % res[2];
+    const s = count[c], e = count[c + 1];
+    for (let p = s; p < e; p++) {
+      const f = items[p];
+      for (let q = p + 1; q < e; q++) {
+        const g = items[q]; budget--;
+        // bbox overlap
+        if (fb[f * 6] > fb[g * 6 + 3] || fb[g * 6] > fb[f * 6 + 3] || fb[f * 6 + 1] > fb[g * 6 + 4] || fb[g * 6 + 1] > fb[f * 6 + 4] || fb[f * 6 + 2] > fb[g * 6 + 5] || fb[g * 6 + 2] > fb[f * 6 + 5]) continue;
+        // test each pair once: in the cell holding the min corner of the overlap box
+        if (Math.max(lo[f * 3], lo[g * 3]) !== ci || Math.max(lo[f * 3 + 1], lo[g * 3 + 1]) !== cj || Math.max(lo[f * 3 + 2], lo[g * 3 + 2]) !== ck) continue;
+        const a0 = F[f * 3], a1 = F[f * 3 + 1], a2 = F[f * 3 + 2], b0 = F[g * 3], b1 = F[g * 3 + 1], b2 = F[g * 3 + 2];
+        if (a0 === b0 || a0 === b1 || a0 === b2 || a1 === b0 || a1 === b1 || a1 === b2 || a2 === b0 || a2 === b1 || a2 === b2) continue;
+        if (triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps)) { pairs++; hit[f] = 1; hit[g] = 1; }
+      }
+    }
+  }
+  const faces = []; for (let f = 0; f < nf && faces.length < (maxList || 200000); f++) if (hit[f]) faces.push(f);
+  return { pairs, faces: Uint32Array.from(faces), truncated: budget <= 0 };
+}
+
+/* ----------------------------------------------------------------- solidify */
+/* Rebuild the model as one solid from a voxel classification. Inside/outside comes
+   from the winding number along grid lines in all three axes (majority vote), and the
+   exact crossing positions on grid edges are kept, so flat faces stay flat. The dual
+   surface (surface nets) is then run through the normal repair so it is manifold. */
+function solidify(mesh, resolution, prog) {
+  const F = mesh.F, V = mesh.V, nf = mesh.nf, dead = mesh.dead;
+  const bb = bbox(V, mesh.nv);
+  const longest = Math.max(bb.size[0], bb.size[1], bb.size[2]) || 1;
+  const N = Math.max(16, Math.min(320, resolution | 0 || 200));
+  const h = longest / N, pad = 2;
+  const frac = [0.2137, 0.3719, 0.1453];
+  const org = [0, 1, 2].map((k) => bb.min[k] - (pad + frac[k]) * h);
+  const dims = [0, 1, 2].map((k) => Math.ceil(bb.size[k] / h) + 2 * pad + 2);
+  const [nx, ny, nz] = dims; const nn = nx * ny * nz;
+  const votes = new Int8Array(nn);
+  const tEdge = [new Uint8Array(nn), new Uint8Array(nn), new Uint8Array(nn)];
+  const idx = (i, j, k) => (i * ny + j) * nz + k;
+  const n = [0, 0, 0];
+  for (let axis = 0; axis < 3; axis++) {
+    if (prog) prog('Rebuilding as solid (' + 'xyz'[axis] + ' rays)', 0.05 + axis * 0.2);
+    const u = (axis + 1) % 3, w = (axis + 2) % 3;
+    const nu = dims[u], nw = dims[w], na = dims[axis];
+    // bin faces by the node lines they cover in the (u,w) plane
+    const cnt = new Int32Array(nu * nw + 1);
+    const rng = new Int32Array(nf * 4);
+    for (let f = 0; f < nf; f++) {
+      if (dead[f]) continue;
+      let umin = Infinity, umax = -Infinity, wmin = Infinity, wmax = -Infinity;
+      for (let c = 0; c < 3; c++) { const v = F[f * 3 + c] * 3; const a = V[v + u], b = V[v + w]; if (a < umin) umin = a; if (a > umax) umax = a; if (b < wmin) wmin = b; if (b > wmax) wmax = b; }
+      const ju0 = Math.max(0, Math.ceil((umin - org[u]) / h)), ju1 = Math.min(nu - 1, Math.floor((umax - org[u]) / h));
+      const jw0 = Math.max(0, Math.ceil((wmin - org[w]) / h)), jw1 = Math.min(nw - 1, Math.floor((wmax - org[w]) / h));
+      rng[f * 4] = ju0; rng[f * 4 + 1] = ju1; rng[f * 4 + 2] = jw0; rng[f * 4 + 3] = jw1;
+      for (let a = ju0; a <= ju1; a++) for (let b = jw0; b <= jw1; b++) cnt[a * nw + b + 1]++;
+    }
+    for (let c = 0; c < nu * nw; c++) cnt[c + 1] += cnt[c];
+    const items = new Int32Array(cnt[nu * nw]); const fill = cnt.slice(0, nu * nw);
+    for (let f = 0; f < nf; f++) { if (dead[f]) continue; for (let a = rng[f * 4]; a <= rng[f * 4 + 1]; a++) for (let b = rng[f * 4 + 2]; b <= rng[f * 4 + 3]; b++) items[fill[a * nw + b]++] = f; }
+    // sweep every line
+    let xs = new Float64Array(64), ss = new Int8Array(64);
+    for (let a = 0; a < nu; a++) for (let b = 0; b < nw; b++) {
+      const s0 = cnt[a * nw + b], s1 = cnt[a * nw + b + 1];
+      const U = org[u] + a * h, W = org[w] + b * h;
+      let m = 0;
+      for (let p = s0; p < s1; p++) {
+        const f = items[p];
+        const v0 = F[f * 3] * 3, v1 = F[f * 3 + 1] * 3, v2 = F[f * 3 + 2] * 3;
+        const a0 = V[v0 + u] - U, b0 = V[v0 + w] - W, a1 = V[v1 + u] - U, b1 = V[v1 + w] - W, a2 = V[v2 + u] - U, b2 = V[v2 + w] - W;
+        const d1 = a0 * b1 - a1 * b0, d2 = a1 * b2 - a2 * b1, d3 = a2 * b0 - a0 * b2;
+        if (!((d1 > 0 && d2 > 0 && d3 > 0) || (d1 < 0 && d2 < 0 && d3 < 0))) continue;
+        faceNormalInto(V, F, f, n);
+        const nA = n[axis]; if (Math.abs(nA) < 1e-12) continue;
+        // barycentric position along the axis
+        const tot = d1 + d2 + d3;
+        const x = (V[v2 + axis] * d1 + V[v0 + axis] * d2 + V[v1 + axis] * d3) / tot;
+        if (m === xs.length) { const nx2 = new Float64Array(m * 2); nx2.set(xs); xs = nx2; const ns2 = new Int8Array(m * 2); ns2.set(ss); ss = ns2; }
+        xs[m] = x; ss[m] = nA > 0 ? -1 : 1; m++;
+      }
+      if (!m) continue;
+      // sort crossings (insertion sort is fine for typical counts, fallback for many)
+      if (m < 40) { for (let i = 1; i < m; i++) { const x = xs[i], s = ss[i]; let j = i - 1; while (j >= 0 && xs[j] > x) { xs[j + 1] = xs[j]; ss[j + 1] = ss[j]; j--; } xs[j + 1] = x; ss[j + 1] = s; } }
+      else { const ord = Array.from({ length: m }, (_, i) => i).sort((p, q) => xs[p] - xs[q]); const x2 = new Float64Array(m), s2 = new Int8Array(m); for (let i = 0; i < m; i++) { x2[i] = xs[ord[i]]; s2[i] = ss[ord[i]]; } xs.set(x2); ss.set(s2); }
+      let wnd = 0, p = 0, lastInside = false, lastTrans = -1;
+      for (let i = 0; i < na; i++) {
+        const X = org[axis] + i * h;
+        while (p < m && xs[p] <= X) { const wasIn = wnd !== 0; wnd += ss[p]; const nowIn = wnd !== 0; if (wasIn !== nowIn) lastTrans = xs[p]; p++; }
+        const inside = wnd !== 0;
+        const node = axis === 0 ? idx(i, a, b) : axis === 1 ? idx(b, i, a) : idx(a, b, i);
+        if (inside) votes[node]++;
+        if (i > 0 && inside !== lastInside && lastTrans >= 0) {
+          const prevNode = axis === 0 ? idx(i - 1, a, b) : axis === 1 ? idx(b, i - 1, a) : idx(a, b, i - 1);
+          let t = (lastTrans - (X - h)) / h; if (t < 0) t = 0; if (t > 1) t = 1;
+          tEdge[axis][prevNode] = 1 + Math.round(t * 254);
+        }
+        lastInside = inside;
+      }
+    }
+  }
+  if (prog) prog('Rebuilding as solid (surface)', 0.7);
+  const inside = new Uint8Array(nn); for (let i = 0; i < nn; i++) inside[i] = votes[i] >= 2 ? 1 : 0;
+  // surface nets: one vertex per mixed cell
+  const cx = nx - 1, cy = ny - 1, cz = nz - 1;
+  const cellV = new Int32Array(cx * cy * cz).fill(-1);
+  const out = new Mesh(1024, 2048);
+  const tOf = (axis, node) => { const q = tEdge[axis][node]; return q ? (q - 1) / 254 : 0.5; };
+  const stride = [ny * nz, nz, 1];
+  for (let i = 0; i < cx; i++) for (let j = 0; j < cy; j++) for (let k = 0; k < cz; k++) {
+    const n0 = idx(i, j, k);
+    const c0 = inside[n0], c1 = inside[n0 + stride[0]], c2 = inside[n0 + stride[1]], c3 = inside[n0 + stride[0] + stride[1]];
+    const c4 = inside[n0 + 1], c5 = inside[n0 + stride[0] + 1], c6 = inside[n0 + stride[1] + 1], c7 = inside[n0 + stride[0] + stride[1] + 1];
+    const sum = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
+    if (sum === 0 || sum === 8) continue;
+    let px = 0, py = 0, pz = 0, cntp = 0;
+    const X = org[0] + i * h, Y = org[1] + j * h, Z = org[2] + k * h;
+    // 12 edges: 4 along x, 4 along y, 4 along z
+    const ex = [[0, 0, 0, c0, c1], [0, 1, 0, c2, c3], [0, 0, 1, c4, c5], [0, 1, 1, c6, c7]];
+    for (const [_, dj, dk, s0, s1] of ex) if (s0 !== s1) { px += X + tOf(0, idx(i, j + dj, k + dk)) * h; py += Y + dj * h; pz += Z + dk * h; cntp++; }
+    const ey = [[0, 0, 0, c0, c2], [1, 0, 0, c1, c3], [0, 0, 1, c4, c6], [1, 0, 1, c5, c7]];
+    for (const [di, _, dk, s0, s1] of ey) if (s0 !== s1) { px += X + di * h; py += Y + tOf(1, idx(i + di, j, k + dk)) * h; pz += Z + dk * h; cntp++; }
+    const ez = [[0, 0, 0, c0, c4], [1, 0, 0, c1, c5], [0, 1, 0, c2, c6], [1, 1, 0, c3, c7]];
+    for (const [di, dj, _, s0, s1] of ez) if (s0 !== s1) { px += X + di * h; py += Y + dj * h; pz += Z + tOf(2, idx(i + di, j + dj, k)) * h; cntp++; }
+    if (!cntp) continue;
+    cellV[(i * cy + j) * cz + k] = out.addVertex(px / cntp, py / cntp, pz / cntp);
+  }
+  const cell = (i, j, k) => cellV[(i * cy + j) * cz + k];
+  const quad = (q0, q1, q2, q3, flipQ) => {
+    if (q0 < 0 || q1 < 0 || q2 < 0 || q3 < 0) return;
+    if (flipQ) { const t = q1; q1 = q3; q3 = t; }
+    const Vo = out.V;
+    const d02 = Math.hypot(Vo[q0 * 3] - Vo[q2 * 3], Vo[q0 * 3 + 1] - Vo[q2 * 3 + 1], Vo[q0 * 3 + 2] - Vo[q2 * 3 + 2]);
+    const d13 = Math.hypot(Vo[q1 * 3] - Vo[q3 * 3], Vo[q1 * 3 + 1] - Vo[q3 * 3 + 1], Vo[q1 * 3 + 2] - Vo[q3 * 3 + 2]);
+    if (d02 <= d13) { out.addFace(q0, q1, q2, -1, 0); out.addFace(q0, q2, q3, -1, 0); } else { out.addFace(q0, q1, q3, -1, 0); out.addFace(q1, q2, q3, -1, 0); }
+  };
+  for (let i = 0; i < nx; i++) for (let j = 1; j < cy; j++) for (let k = 1; k < cz; k++) {
+    // x-edge (i,j,k)-(i+1,j,k)
+    if (i < cx) { const s0 = inside[idx(i, j, k)], s1 = inside[idx(i + 1, j, k)]; if (s0 !== s1) quad(cell(i, j - 1, k - 1), cell(i, j, k - 1), cell(i, j, k), cell(i, j - 1, k), s0 === 0); }
+  }
+  for (let i = 1; i < cx; i++) for (let j = 0; j < cy; j++) for (let k = 1; k < cz; k++) {
+    const s0 = inside[idx(i, j, k)], s1 = inside[idx(i, j + 1, k)]; if (s0 !== s1) quad(cell(i - 1, j, k - 1), cell(i - 1, j, k), cell(i, j, k), cell(i, j, k - 1), s0 === 0);
+  }
+  for (let i = 1; i < cx; i++) for (let j = 1; j < cy; j++) for (let k = 0; k < cz; k++) {
+    const s0 = inside[idx(i, j, k)], s1 = inside[idx(i, j, k + 1)]; if (s0 !== s1) quad(cell(i - 1, j - 1, k), cell(i, j - 1, k), cell(i, j, k), cell(i - 1, j, k), s0 === 0);
+  }
+  out.compact();
+  return { mesh: out, resolution: N, voxel: h, dims };
+}
+
+/* ------------------------------------------------------------------ export */
+function exportBinarySTL(V, F, nf, name) {
+  const buf = new ArrayBuffer(84 + nf * 50); const dv = new DataView(buf); const u8 = new Uint8Array(buf);
+  const header = ('STL Repair (local) ' + (name || '')).slice(0, 80);
+  for (let i = 0; i < header.length; i++) u8[i] = header.charCodeAt(i) & 0x7f;
+  dv.setUint32(80, nf, true);
+  let o = 84; const n = [0, 0, 0];
+  for (let f = 0; f < nf; f++) {
+    faceNormalInto(V, F, f, n);
+    dv.setFloat32(o, n[0], true); dv.setFloat32(o + 4, n[1], true); dv.setFloat32(o + 8, n[2], true);
+    for (let k = 0; k < 3; k++) { const v = F[f * 3 + k] * 3; dv.setFloat32(o + 12 + k * 12, V[v], true); dv.setFloat32(o + 16 + k * 12, V[v + 1], true); dv.setFloat32(o + 20 + k * 12, V[v + 2], true); }
+    dv.setUint16(o + 48, 0, true); o += 50;
+  }
+  return buf;
+}
+function exportAsciiSTL(V, F, nf, name) {
+  const parts = ['solid ' + (name || 'repaired').replace(/\s+/g, '_') + '\n']; const n = [0, 0, 0];
+  const g = (x) => Number.isFinite(x) ? (Math.round(x * 1e6) / 1e6).toString() : '0';
+  for (let f = 0; f < nf; f++) {
+    faceNormalInto(V, F, f, n);
+    parts.push(`facet normal ${g(n[0])} ${g(n[1])} ${g(n[2])}\n  outer loop\n`);
+    for (let k = 0; k < 3; k++) { const v = F[f * 3 + k] * 3; parts.push(`    vertex ${g(V[v])} ${g(V[v + 1])} ${g(V[v + 2])}\n`); }
+    parts.push('  endloop\nendfacet\n');
+  }
+  parts.push('endsolid ' + (name || 'repaired').replace(/\s+/g, '_') + '\n');
+  return parts.join('');
+}
+
+/* --------------------------------------------------------------- zip (store) */
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[i] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(entries) { // [{name, data: Uint8Array}]
+  const enc = new TextEncoder(); const locals = [], centrals = []; let offset = 0;
+  const d = new Date(); const dosTime = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xffff; const dosDate = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xffff;
+  for (const e of entries) {
+    const name = enc.encode(e.name); const data = e.data; const crc = crc32(data);
+    const lh = new Uint8Array(30 + name.length); const dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0x0800, true); dv.setUint16(8, 0, true); dv.setUint16(10, dosTime, true); dv.setUint16(12, dosDate, true);
+    dv.setUint32(14, crc, true); dv.setUint32(18, data.length, true); dv.setUint32(22, data.length, true); dv.setUint16(26, name.length, true); dv.setUint16(28, 0, true); lh.set(name, 30);
+    const ch = new Uint8Array(46 + name.length); const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true); cv.setUint16(12, dosTime, true); cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true); cv.setUint16(28, name.length, true); cv.setUint16(30, 0, true); cv.setUint16(32, 0, true); cv.setUint16(34, 0, true); cv.setUint16(36, 0, true); cv.setUint32(38, 0, true); cv.setUint32(42, offset, true); ch.set(name, 46);
+    locals.push(lh, data); centrals.push(ch); offset += lh.length + data.length;
+  }
+  const cdSize = centrals.reduce((s, c) => s + c.length, 0);
+  const end = new Uint8Array(22); const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(4, 0, true); ev.setUint16(6, 0, true); ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true); ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true); ev.setUint16(20, 0, true);
+  const total = offset + cdSize + 22; const out = new Uint8Array(total); let p = 0;
+  for (const part of locals) { out.set(part, p); p += part.length; } for (const c of centrals) { out.set(c, p); p += c.length; } out.set(end, p);
+  return out;
+}
+
+/* ------------------------------------------------------ synthetic test meshes */
+const synth = (() => {
+  function soup() { const t = []; return { t, tri(a, b, c) { t.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); }, quad(a, b, c, d) { this.tri(a, b, c); this.tri(a, c, d); }, done() { return { tris: Float32Array.from(t), normals: null, count: t.length / 9, format: 'synthetic', header: 'synthetic' }; } }; }
+  function box(s, x0, y0, z0, x1, y1, z1) {
+    const p = (x, y, z) => [x, y, z];
+    const a = p(x0, y0, z0), b = p(x1, y0, z0), c = p(x1, y1, z0), d = p(x0, y1, z0), e = p(x0, y0, z1), f = p(x1, y0, z1), g = p(x1, y1, z1), h = p(x0, y1, z1);
+    s.quad(a, d, c, b); s.quad(e, f, g, h); s.quad(a, b, f, e); s.quad(b, c, g, f); s.quad(c, d, h, g); s.quad(d, a, e, h);
+  }
+  function cylinder(s, cx, cy, z0, z1, r, n, opts) {
+    opts = opts || {}; const ring = (z) => { const o = []; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; o.push([cx + r * Math.cos(a), cy + r * Math.sin(a), z]); } return o; };
+    const lo = ring(z0), hi = ring(z1);
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; if (opts.skipSide && opts.skipSide.includes(i)) continue; s.quad(lo[i], lo[j], hi[j], hi[i]); }
+    const cb = [cx, cy, z0], ct = [cx, cy, z1];
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; if (!opts.noBottom) s.tri(cb, lo[j], lo[i]); if (!opts.noTop) { if (opts.flipTop && opts.flipTop.includes(i)) s.tri(ct, hi[j], hi[i]); else s.tri(ct, hi[i], hi[j]); } }
+  }
+  return {
+    soup, box, cylinder,
+    cube(size) { const s = soup(); box(s, 0, 0, 0, size, size, size); return s.done(); },
+    demoPart() {
+      const s = soup();
+      // base plate with a missing quad on top (planar hole)
+      const p = (x, y, z) => [x, y, z];
+      const x0 = -30, x1 = 30, y0 = -20, y1 = 20, z0 = 0, z1 = 6;
+      const a = p(x0, y0, z0), b = p(x1, y0, z0), c = p(x1, y1, z0), d = p(x0, y1, z0), e = p(x0, y0, z1), f = p(x1, y0, z1), g = p(x1, y1, z1), h = p(x0, y1, z1);
+      s.quad(a, d, c, b); s.quad(a, b, f, e); s.quad(b, c, g, f); s.quad(c, d, h, g); s.quad(d, a, e, h);
+      // top face tessellated as a grid so we can punch a hole in it
+      const nx = 6, ny = 4;
+      for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+        if (i === 1 && j === 1) continue; // planar hole (quad)
+        const xa = x0 + (x1 - x0) * i / nx, xb = x0 + (x1 - x0) * (i + 1) / nx, ya = y0 + (y1 - y0) * j / ny, yb = y0 + (y1 - y0) * (j + 1) / ny;
+        if (i === 4 && j === 2) { s.quad(p(xa, ya, z1), p(xb, ya, z1), p(xb, yb, z1), p(xa, yb, z1)); s.quad(p(xa, ya, z1), p(xb, ya, z1), p(xb, yb, z1), p(xa, yb, z1)); continue; } // duplicate faces
+        if (i === 3 && j === 0) { s.quad(p(xa, yb, z1), p(xb, yb, z1), p(xb, ya, z1), p(xa, ya, z1)); continue; } // inverted quad
+        s.quad(p(xa, ya, z1), p(xb, ya, z1), p(xb, yb, z1), p(xa, yb, z1));
+      }
+      // boss cylinder overlapping the plate (separate shell) with a strip missing (non-planar hole) and flipped cap facets
+      cylinder(s, 12, 0, 3, 22, 9, 36, { skipSide: [5, 6, 7], flipTop: [20, 21, 22] });
+      // degenerate sliver on the plate edge
+      s.tri(p(x0, y0, z0), p(x0 + 10, y0, z0), p(x0 + 5, y0, z0));
+      // dangling fin attached to the front bottom edge (non-manifold edge)
+      s.tri(p(-10, y0, z0), p(0, y0, z0), p(-5, y0 - 8, z0 - 2));
+      // tiny floating shell far away (two coincident triangles, opposite windings)
+      s.tri(p(45, 30, 20), p(46, 30, 20), p(45.5, 31, 20)); s.tri(p(45, 30, 20), p(45.5, 31, 20), p(46, 30, 20));
+      return s.done();
+    },
+  };
+})();
+
+var api; api = { parseSTL, weldExact, buildTopology, analyze, repair, exportBinarySTL, exportAsciiSTL, makeZip, synth, DEFAULTS, FLAG_FLIPPED, FLAG_FILL, FLAG_SPLIT, fmtInt, Mesh, bbox,
+  _boundaryLoops: boundaryLoops, _loopGeometry: loopGeometry, _classifyDegenerate: classifyDegenerate, _faceComponents: faceComponents, _orientationFlips: orientationFlips,
+  findSelfIntersections, solidify, removeSlivers, _fixTJunctions: fixTJunctions, _fillHoles: fillHoles, _componentOrientation: componentOrientation };
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+return api;
+})();
+
+</script>
+<script>
+/* ============================================================================
+   MeshViewer — dependency-free WebGL mesh viewer with problem overlays.
+   Flat shading via screen-space derivatives (no per-face vertex duplication),
+   back faces tinted so holes and inverted faces are visible at a glance.
+   ============================================================================ */
+var MeshViewer = (function () {
+'use strict';
+
+/* ---- tiny mat4 helpers (column-major) ---- */
+function perspective(fovy, aspect, near, far) {
+  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+}
+function lookAt(eye, target, up) {
+  let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+  let l = Math.hypot(zx, zy, zz) || 1; zx /= l; zy /= l; zz /= l;
+  let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+  l = Math.hypot(xx, xy, xz) || 1; xx /= l; xy /= l; xz /= l;
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  return new Float32Array([xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
+    -(xx * eye[0] + xy * eye[1] + xz * eye[2]), -(yx * eye[0] + yy * eye[1] + yz * eye[2]), -(zx * eye[0] + zy * eye[1] + zz * eye[2]), 1]);
+}
+function mul(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  return o;
+}
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; }
+
+const SHADE = `
+  vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+  vec3 L1 = normalize(vec3(0.35, 0.45, 1.0)); vec3 L2 = normalize(vec3(-0.6, -0.3, 0.4));
+  float d = max(dot(n, L1), 0.0) * 0.75 + max(dot(n, L2), 0.0) * 0.25;
+  vec3 Vd = normalize(-vPos); float spec = pow(max(dot(reflect(-L1, n), Vd), 0.0), 40.0) * 0.18;
+  vec3 base = gl_FrontFacing ? uColor : uBack;
+  vec3 c = base * (0.28 + 0.72 * d) + vec3(spec);`;
+// GLSL ES 1.00 (WebGL1, derivatives via extension)
+const VS1 = `attribute vec3 aPos; uniform mat4 uMVP; uniform mat4 uMV; varying vec3 vPos;
+void main(){ vec4 p = uMV * vec4(aPos, 1.0); vPos = p.xyz; gl_Position = uMVP * vec4(aPos, 1.0); }`;
+const FS1 = `#extension GL_OES_standard_derivatives : enable
+precision mediump float; varying vec3 vPos; uniform vec3 uColor; uniform vec3 uBack; uniform float uAlpha;
+void main(){ ${SHADE} gl_FragColor = vec4(c, uAlpha); }`;
+const VS1_LINE = `attribute vec3 aPos; uniform mat4 uMVP; void main(){ gl_Position = uMVP * vec4(aPos, 1.0); gl_Position.z -= 0.0008 * gl_Position.w; }`;
+const FS1_LINE = `precision mediump float; uniform vec3 uColor; void main(){ gl_FragColor = vec4(uColor, 1.0); }`;
+// GLSL ES 3.00 (WebGL2, derivatives are core)
+const VS2 = `#version 300 es
+in vec3 aPos; uniform mat4 uMVP; uniform mat4 uMV; out vec3 vPos;
+void main(){ vec4 p = uMV * vec4(aPos, 1.0); vPos = p.xyz; gl_Position = uMVP * vec4(aPos, 1.0); }`;
+const FS2 = `#version 300 es
+precision mediump float; in vec3 vPos; uniform vec3 uColor; uniform vec3 uBack; uniform float uAlpha; out vec4 fragColor;
+void main(){ ${SHADE} fragColor = vec4(c, uAlpha); }`;
+const VS2_LINE = `#version 300 es
+in vec3 aPos; uniform mat4 uMVP; void main(){ gl_Position = uMVP * vec4(aPos, 1.0); gl_Position.z -= 0.0008 * gl_Position.w; }`;
+const FS2_LINE = `#version 300 es
+precision mediump float; uniform vec3 uColor; out vec4 fragColor; void main(){ fragColor = vec4(uColor, 1.0); }`;
+
+function create(canvas, theme) {
+  const isGL2 = !!window.WebGL2RenderingContext;
+  let gl = isGL2 ? canvas.getContext('webgl2', { antialias: true, alpha: true, preserveDrawingBuffer: false }) : null;
+  let gl2 = !!gl;
+  if (!gl) { gl = canvas.getContext('webgl', { antialias: true, alpha: true }); gl2 = false; }
+  if (!gl) return null;
+  if (!gl2) { gl.getExtension('OES_element_index_uint'); if (!gl.getExtension('OES_standard_derivatives')) return null; }
+  const compile = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); } return s; };
+  const program = (vs, fs) => { const p = gl.createProgram(); gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); return p; };
+  const pBody = gl2 ? program(VS2, FS2) : program(VS1, FS1), pLine = gl2 ? program(VS2_LINE, FS2_LINE) : program(VS1_LINE, FS1_LINE);
+  if (!gl.getProgramParameter(pBody, gl.LINK_STATUS) || !gl.getProgramParameter(pLine, gl.LINK_STATUS)) { console.error('shader link failed', gl.getProgramInfoLog(pBody), gl.getProgramInfoLog(pLine)); return null; }
+  const U = (p, n) => gl.getUniformLocation(p, n);
+  const uB = { mvp: U(pBody, 'uMVP'), mv: U(pBody, 'uMV'), color: U(pBody, 'uColor'), back: U(pBody, 'uBack'), alpha: U(pBody, 'uAlpha'), pos: gl.getAttribLocation(pBody, 'aPos') };
+  const uL = { mvp: U(pLine, 'uMVP'), color: U(pLine, 'uColor'), pos: gl.getAttribLocation(pLine, 'aPos') };
+
+  const colors = Object.assign({
+    body: '#c9d1da', back: '#e2604a', inverted: '#f0a41b', fill: '#3ec46d', naked: '#ff3b2f', nonManifold: '#e23bff', degenerate: '#ffd21f', selfx: '#22c7e6', wire: '#3a4250', clear: [0, 0, 0, 0],
+  }, theme || {});
+
+  const state = {
+    V: null, nv: 0, nf: 0, bbox: null,
+    vbo: null, ibo: null, subsets: {}, lines: {}, wireBuf: null, wireCount: 0,
+    show: { problems: true, fills: true, wire: false },
+    cam: { yaw: 0.6, pitch: 0.5, dist: 10, target: [0, 0, 0], radius: 1 },
+    dirty: true, alive: true,
+  };
+
+  function setMesh(mesh, overlays) {
+    // mesh: {V: Float64Array|Float32Array, F: Uint32Array, nv, nf}
+    for (const k of Object.keys(state.subsets)) gl.deleteBuffer(state.subsets[k].buf);
+    for (const k of Object.keys(state.lines)) gl.deleteBuffer(state.lines[k].buf);
+    if (state.vbo) gl.deleteBuffer(state.vbo); if (state.ibo) gl.deleteBuffer(state.ibo); if (state.wireBuf) gl.deleteBuffer(state.wireBuf);
+    state.subsets = {}; state.lines = {}; state.wireBuf = null; state.wireCount = 0;
+    if (!mesh || !mesh.nf) { state.V = null; state.nf = 0; state.dirty = true; return; }
+    const V32 = mesh.V instanceof Float32Array ? mesh.V : Float32Array.from(mesh.V.subarray ? mesh.V.subarray(0, mesh.nv * 3) : mesh.V);
+    state.V = V32; state.nv = mesh.nv; state.nf = mesh.nf; state.F = mesh.F;
+    state.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, state.vbo); gl.bufferData(gl.ARRAY_BUFFER, V32, gl.STATIC_DRAW);
+    state.ibo = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, state.ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.F.subarray ? mesh.F.subarray(0, mesh.nf * 3) : mesh.F, gl.STATIC_DRAW);
+    // bbox
+    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < mesh.nv; i++) for (let k = 0; k < 3; k++) { const v = V32[i * 3 + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v; }
+    state.bbox = { min: mn, max: mx };
+    const ov = overlays || {};
+    const faceSubset = (name, list, color) => {
+      if (!list || !list.length) return;
+      const idx = new Uint32Array(list.length * 3);
+      for (let i = 0; i < list.length; i++) { const f = list[i]; idx[i * 3] = mesh.F[f * 3]; idx[i * 3 + 1] = mesh.F[f * 3 + 1]; idx[i * 3 + 2] = mesh.F[f * 3 + 2]; }
+      const buf = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+      state.subsets[name] = { buf, count: idx.length, color: hexToRgb(color) };
+    };
+    const edgeSet = (name, pairs, color) => {
+      if (!pairs || !pairs.length) return;
+      const pos = new Float32Array(pairs.length * 3);
+      for (let i = 0; i < pairs.length; i++) { const v = pairs[i] * 3; pos[i * 3] = V32[v]; pos[i * 3 + 1] = V32[v + 1]; pos[i * 3 + 2] = V32[v + 2]; }
+      const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+      state.lines[name] = { buf, count: pairs.length, color: hexToRgb(color) };
+    };
+    faceSubset('selfx', ov.selfxFaces, colors.selfx);
+    faceSubset('fill', ov.fillFaces, colors.fill);
+    faceSubset('inverted', ov.invertedFaces, colors.inverted);
+    faceSubset('degenerate', ov.degenerateFaces, colors.degenerate);
+    faceSubset('duplicate', ov.duplicateFaces, colors.degenerate);
+    edgeSet('naked', ov.nakedEdges, colors.naked);
+    edgeSet('nonManifold', ov.nonManifoldEdges, colors.nonManifold);
+    state.dirty = true;
+  }
+
+  function buildWire() {
+    if (state.wireBuf || !state.F) return;
+    const F = state.F, nf = state.nf, V = state.V;
+    // unique edges via hash of (lo,hi)
+    const ns = nf * 3; let size = 1; while (size < ns * 2) size *= 2; const mask = size - 1;
+    const table = new Int32Array(size).fill(-1); const eLo = new Uint32Array(ns), eHi = new Uint32Array(ns); let ne = 0;
+    for (let s = 0; s < ns; s++) {
+      const f = (s / 3) | 0, k = s % 3; const a = F[f * 3 + k], b = F[f * 3 + (k === 2 ? 0 : k + 1)];
+      const lo = a < b ? a : b, hi = a < b ? b : a;
+      let h = (Math.imul(lo, 0x9E3779B1) ^ Math.imul(hi, 0x85EBCA77)) >>> 0; h &= mask;
+      let found = false;
+      while (true) { const t = table[h]; if (t < 0) break; if (eLo[t] === lo && eHi[t] === hi) { found = true; break; } h = (h + 1) & mask; }
+      if (!found) { table[h] = ne; eLo[ne] = lo; eHi[ne] = hi; ne++; }
+    }
+    const pos = new Float32Array(ne * 6);
+    for (let e = 0; e < ne; e++) { const a = eLo[e] * 3, b = eHi[e] * 3; pos[e * 6] = V[a]; pos[e * 6 + 1] = V[a + 1]; pos[e * 6 + 2] = V[a + 2]; pos[e * 6 + 3] = V[b]; pos[e * 6 + 4] = V[b + 1]; pos[e * 6 + 5] = V[b + 2]; }
+    state.wireBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, state.wireBuf); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW); state.wireCount = ne * 2;
+  }
+
+  function fit() {
+    if (!state.bbox) return;
+    const b = state.bbox; const c = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+    const r = Math.max(1e-6, Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2);
+    state.cam.target = c; state.cam.radius = r; state.cam.dist = r * 2.6; state.cam.yaw = 0.7; state.cam.pitch = 0.45; state.dirty = true;
+  }
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.floor(canvas.clientWidth * dpr)), h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; state.dirty = true; }
+  }
+
+  function render() {
+    if (!state.alive) return;
+    resize();
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    const cc = colors.clear; gl.clearColor(cc[0], cc[1], cc[2], cc[3]);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (!state.vbo) return;
+    const cam = state.cam;
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const eye = [cam.target[0] + cam.dist * cp * Math.cos(cam.yaw), cam.target[1] + cam.dist * cp * Math.sin(cam.yaw), cam.target[2] + cam.dist * sp];
+    const view = lookAt(eye, cam.target, [0, 0, 1]);
+    const near = Math.max(cam.dist - cam.radius * 3, cam.radius * 0.01), far = cam.dist + cam.radius * 3;
+    const proj = perspective(40 * Math.PI / 180, canvas.width / canvas.height, near, far);
+    const mvp = mul(proj, view);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // body
+    gl.useProgram(pBody);
+    gl.uniformMatrix4fv(uB.mvp, false, mvp); gl.uniformMatrix4fv(uB.mv, false, view);
+    gl.bindBuffer(gl.ARRAY_BUFFER, state.vbo); gl.enableVertexAttribArray(uB.pos); gl.vertexAttribPointer(uB.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, state.ibo);
+    const body = hexToRgb(colors.body), back = hexToRgb(colors.back);
+    gl.uniform3f(uB.color, body[0], body[1], body[2]); gl.uniform3f(uB.back, back[0], back[1], back[2]); gl.uniform1f(uB.alpha, 1.0);
+    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0, 1.0);
+    gl.drawElements(gl.TRIANGLES, state.nf * 3, gl.UNSIGNED_INT, 0);
+    // subsets
+    gl.polygonOffset(-1.0, -1.0);
+    const drawSub = (name) => { const s = state.subsets[name]; if (!s) return; gl.uniform3f(uB.color, s.color[0], s.color[1], s.color[2]); gl.uniform3f(uB.back, s.color[0] * 0.7, s.color[1] * 0.7, s.color[2] * 0.7); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, s.buf); gl.drawElements(gl.TRIANGLES, s.count, gl.UNSIGNED_INT, 0); };
+    if (state.show.fills) drawSub('fill');
+    if (state.show.problems) { drawSub('selfx'); drawSub('inverted'); drawSub('degenerate'); drawSub('duplicate'); }
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    // lines
+    gl.useProgram(pLine); gl.uniformMatrix4fv(uL.mvp, false, mvp);
+    if (state.show.wire) {
+      buildWire();
+      if (state.wireBuf) { const c = hexToRgb(colors.wire); gl.uniform3f(uL.color, c[0], c[1], c[2]); gl.bindBuffer(gl.ARRAY_BUFFER, state.wireBuf); gl.enableVertexAttribArray(uL.pos); gl.vertexAttribPointer(uL.pos, 3, gl.FLOAT, false, 0, 0); gl.drawArrays(gl.LINES, 0, state.wireCount); }
+    }
+    if (state.show.problems) {
+      gl.disable(gl.DEPTH_TEST);
+      for (const name of ['nonManifold', 'naked']) {
+        const l = state.lines[name]; if (!l) continue;
+        gl.uniform3f(uL.color, l.color[0], l.color[1], l.color[2]);
+        gl.bindBuffer(gl.ARRAY_BUFFER, l.buf); gl.enableVertexAttribArray(uL.pos); gl.vertexAttribPointer(uL.pos, 3, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.LINES, 0, l.count);
+      }
+      gl.enable(gl.DEPTH_TEST);
+    }
+  }
+
+  function loop() { if (!state.alive) return; if (state.dirty) { state.dirty = false; render(); } requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+
+  /* ---- interaction ---- */
+  let drag = null;
+  const rect = () => canvas.getBoundingClientRect();
+  canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey }; e.preventDefault(); });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+    const cam = state.cam;
+    if (drag.btn === 0 && !drag.shift) { cam.yaw -= dx * 0.008; cam.pitch = Math.max(-1.55, Math.min(1.55, cam.pitch + dy * 0.008)); }
+    else { // pan in view plane
+      const r = rect(); const scale = cam.dist * Math.tan(20 * Math.PI / 180) * 2 / r.height;
+      const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+      const right = [-sy, cy, 0], up = [-sp * cy, -sp * sy, cp];
+      for (let k = 0; k < 3; k++) cam.target[k] += (-dx * right[k] + dy * up[k]) * scale;
+    }
+    state.dirty = true;
+  });
+  const endDrag = () => { drag = null; };
+  canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', (e) => { e.preventDefault(); const f = Math.exp(Math.sign(e.deltaY) * 0.12); state.cam.dist = Math.max(state.cam.radius * 0.05, Math.min(state.cam.radius * 40, state.cam.dist * f)); state.dirty = true; }, { passive: false });
+  canvas.addEventListener('dblclick', () => { fit(); });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  // touch pinch
+  let pinch = null;
+  canvas.addEventListener('touchstart', (e) => { if (e.touches.length === 2) { pinch = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); } }, { passive: true });
+  canvas.addEventListener('touchmove', (e) => { if (e.touches.length === 2 && pinch) { const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); state.cam.dist = Math.max(state.cam.radius * 0.05, state.cam.dist * pinch / Math.max(1, d)); pinch = d; state.dirty = true; e.preventDefault(); } }, { passive: false });
+  canvas.addEventListener('touchend', () => { pinch = null; });
+  if (window.ResizeObserver) new ResizeObserver(() => { state.dirty = true; }).observe(canvas);
+
+  return {
+    setMesh, fit, gl2,
+    setShow(k, v) { state.show[k] = v; state.dirty = true; },
+    getShow() { return Object.assign({}, state.show); },
+    setColors(c) { Object.assign(colors, c); state.dirty = true; },
+    redraw() { state.dirty = true; },
+    destroy() { state.alive = false; },
+  };
+}
+return { create };
+})();
+
+</script>
+<script>
+/* ============================================================================
+   Watertight — app logic: file intake, worker orchestration, console report,
+   3D viewer wiring, downloads (local file or artifact sandbox).
+   ============================================================================ */
+(function () {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const E = STLRepair;
+const fmt = E.fmtInt;
+
+/* ------------------------------------------------------------------ help text */
+const HELP = {
+  naked: 'Edges used by only one triangle. The surface has an opening there: a hole, a crack, or an unwelded seam. Slicers cannot tell inside from outside.',
+  planar: 'Holes whose boundary lies in one plane, e.g. a missing flat face. Filled with a minimum-weight triangulation; islands inside the hole are kept open.',
+  nonplanar: 'Holes whose boundary bends in 3D, e.g. a missing patch on a curved surface. Filled with a triangulation that keeps the surface as smooth as possible.',
+  nonmanifold: 'Edges shared by three or more triangles: fins, internal walls, or two shells touching along an edge. They are separated, or the extra fin is removed.',
+  inverted: 'Triangles whose winding (front side) disagrees with their neighbours or points into the solid. They are flipped so every shell faces outward and cavities face inward.',
+  duplicate: 'Triangles that use exactly the same three vertices. One copy is kept; an opposite-facing pair cancels out.',
+  degenerate: 'Triangles with zero area: two identical corners, or three corners on a line. They are collapsed or removed and the gap is stitched.',
+  shells: 'Separate closed surfaces beyond the first one. Extra shells can be intended (a multi-part model) or noise (floating fragments). Zero-volume shells are removed.',
+  selfx: 'Pairs of triangles that pass through each other, e.g. overlapping parts exported as separate shells. Most slicers cope, but phantom walls or missing regions can appear. Topology repair cannot remove them; "Rebuild as solid" resamples the model into one clean solid.',
+};
+
+/* ------------------------------------------------------------------ state */
+const jobs = []; let current = null; let nextId = 1;
+let worker = null, workerReady = false, running = null; const queue = [];
+let viewer = null; let viewMode = 'repaired';
+
+/* ------------------------------------------------------------------ options */
+function readOptions() {
+  const tolSel = $('#optTol').value;
+  const tolerance = tolSel === 'off' ? 0 : parseFloat(tolSel);
+  return {
+    tolerance,
+    fillHoles: $('#optFill').checked,
+    maxHoleEdges: Math.max(0, parseInt($('#optMaxHole').value, 10) || 0),
+    removeZeroVolumeShells: $('#optZero').checked,
+    removeSmallShells: $('#optSmall').checked,
+    smallShellFraction: Math.max(0, parseFloat($('#optSmallPct').value) || 0) / 100,
+    cavities: $('#optCavities').checked,
+    solidify: $('#optSolid').checked,
+    solidifyResolution: parseInt($('#optSolidRes').value, 10) || 200,
+    ascii: $('#optFormat').value === 'ascii',
+  };
+}
+
+/* ------------------------------------------------------------------ worker */
+async function engineSource() {
+  const el = document.getElementById('engine-src');
+  if (el && el.textContent.trim().length > 100) return el.textContent;
+  if (el && el.src) return await (await fetch(el.src)).text();
+  throw new Error('engine source unavailable');
+}
+const WORKER_BOOT = `
+self.onmessage = function (e) {
+  var m = e.data;
+  try {
+    var parsed = STLRepair.parseSTL(m.buffer, m.name);
+    var r = STLRepair.repair(parsed, m.options, function (stage, frac) { self.postMessage({ id: m.id, type: 'progress', stage: stage, frac: frac }); });
+    var t = [r.original.V.buffer, r.original.F.buffer, r.original.flags.buffer, r.repaired.V.buffer, r.repaired.F.buffer, r.repaired.flags.buffer];
+    self.postMessage({ id: m.id, type: 'result', result: r }, t);
+  } catch (err) { self.postMessage({ id: m.id, type: 'error', message: String(err && err.message || err), stack: err && err.stack }); }
+};`;
+async function makeWorker() {
+  try {
+    const src = await engineSource();
+    const blob = new Blob([src, '\n', WORKER_BOOT], { type: 'text/javascript' });
+    const url = URL.createObjectURL(blob);
+    const w = new Worker(url);
+    await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('worker timeout')), 4000); w.onerror = (e) => { clearTimeout(t); rej(e); }; w.onmessage = () => { clearTimeout(t); res(); }; w.postMessage({ id: 0, buffer: new ArrayBuffer(0), name: 'ping', options: {} }); });
+    w.onerror = null; w.onmessage = null;
+    return w;
+  } catch (e) { console.warn('Web Worker unavailable, running on the main thread', e); return null; }
+}
+
+function runNext() {
+  if (running || !queue.length || !workerReady) return;
+  const job = queue.shift(); running = job; job.status = 'running'; job.progress = 0; job.stage = 'Reading file'; renderJobs();
+  if (job === current) renderCurrent();
+  job.file.arrayBuffer().then((buffer) => {
+    job.stage = 'Starting'; job.options = readOptions();
+    const opts = Object.assign({}, job.options);
+    if (worker) {
+      worker.onmessage = (e) => {
+        const m = e.data; if (m.id !== job.id) return;
+        if (m.type === 'progress') { job.progress = m.frac; job.stage = m.stage; if (job === current) renderProgress(job); renderJobs(); }
+        else if (m.type === 'result') finish(job, m.result);
+        else if (m.type === 'error') fail(job, m.message);
+      };
+      worker.onerror = (e) => { fail(job, e.message || 'worker error'); };
+      worker.postMessage({ id: job.id, buffer, name: job.name, options: opts }, [buffer]);
+    } else {
+      setTimeout(() => {
+        try {
+          const parsed = E.parseSTL(buffer, job.name);
+          const r = E.repair(parsed, opts, (stage, frac) => { job.progress = frac; job.stage = stage; });
+          finish(job, r);
+        } catch (err) { fail(job, err.message); }
+      }, 30);
+    }
+  }).catch((err) => fail(job, err.message));
+}
+function finish(job, result) {
+  job.status = 'done'; job.result = result; job.progress = 1; job.stage = 'Done';
+  job.lines = buildConsole(job); running = null; renderJobs(); if (job === current) renderCurrent(); updateBatch(); runNext();
+}
+function fail(job, message) {
+  job.status = 'error'; job.error = message || 'Unknown error'; running = null; renderJobs(); if (job === current) renderCurrent(); updateBatch(); runNext();
+}
+
+/* ------------------------------------------------------------------ intake */
+function addFiles(files, extra) {
+  const list = Array.from(files).filter((f) => f && (f.size > 0));
+  for (const f of list) {
+    const job = Object.assign({ id: nextId++, name: f.name, size: f.size, file: f, status: 'queued', progress: 0, stage: 'Queued', sample: false }, extra || {});
+    jobs.push(job); queue.push(job);
+    if (!current || current.sample && !job.sample) current = job;
+  }
+  renderJobs(); renderCurrent(); runNext();
+}
+function loadSample() {
+  const d = E.synth.demoPart();
+  const m = E.weldExact(d.tris, d.count);
+  const buf = E.exportBinarySTL(m.V, m.F, m.nf, 'sample');
+  const file = new File([buf], 'sample-bracket.stl', { type: 'model/stl' });
+  addFiles([file], { sample: true });
+}
+
+/* ------------------------------------------------------------------ console */
+function countLine(n, label, key, cls) {
+  const bad = n > 0;
+  return { t: `--> ${n} ${label}`, n, label, key, cls: bad ? (cls || 'bad') : 'ok' };
+}
+function buildConsole(job) {
+  const r = job.result, b = r.before, a = r.after, L = [];
+  const sizeStr = job.size > 1048576 ? (job.size / 1048576).toFixed(1) + ' MB' : (job.size / 1024).toFixed(0) + ' KB';
+  L.push({ t: `-> Loading ${job.name}${job.sample ? ' (generated sample)' : ''}`, cls: 'head' });
+  L.push({ t: `--> ${r.format} STL, ${fmt(r.counts.rawTriangles)} triangles, ${sizeStr}${r.invalidValues ? `, ${fmt(r.invalidValues)} invalid coordinates replaced` : ''}` });
+  L.push({ t: '-> Analyzing file', cls: 'head' });
+  const push = (an, after) => {
+    L.push(countLine(an.nakedEdges, 'Naked edges', 'naked'));
+    L.push(countLine(an.planarHoles, 'Planar holes', 'planar'));
+    L.push(countLine(an.nonPlanarHoles, 'Non-planar holes', 'nonplanar'));
+    L.push(countLine(an.nonManifoldEdges, 'Non-manifold edges', 'nonmanifold'));
+    L.push(countLine(an.invertedNormals, 'Inverted normals', 'inverted'));
+    L.push(countLine(an.duplicateFaces, 'Duplicate faces', 'duplicate'));
+    L.push(countLine(an.degenerateFaces, 'Degenerate faces', 'degenerate', after ? 'warn' : 'bad'));
+    L.push(countLine(an.disjointShells, 'Disjoint shells', 'shells', 'warn'));
+    if (an.selfIntersections === null || an.selfIntersections === undefined) L.push({ t: '--> Self-intersections not checked (mesh too large)', cls: '' });
+    else L.push(countLine(an.selfIntersections, 'Self-intersecting pairs', 'selfx', 'warn'));
+    if (an.orientationConflicts) L.push(countLine(an.orientationConflicts, 'Non-orientable folds', 'inverted'));
+  };
+  push(b, false);
+  L.push({ t: '-> Repairing: 100.00%', cls: 'head', progress: true });
+  for (const l of r.log) L.push({ t: '--> ' + l.t, cls: l.c === 'warn' ? 'warn' : '' });
+  if (r.log.length <= 1 && b.printable) L.push({ t: '--> Nothing to repair. Normals recomputed from winding on export.' });
+  L.push({ t: '-> Verifying repaired file', cls: 'head' });
+  push(a, true);
+  L.push({ t: `-> Time needed for repair (ms): ${Math.round(r.ms)}`, cls: 'head' });
+  const dv = r.counts.vertsAfter - r.counts.vertsBefore, dt = r.counts.trisAfter - r.counts.trisBefore;
+  const sg = (d) => d > 0 ? `+${fmt(d)}` : d < 0 ? `−${fmt(-d)}` : '±0';
+  L.push({ t: `--> Vertex count changed from ${fmt(r.counts.vertsBefore)} to ${fmt(r.counts.vertsAfter)} (${sg(dv)})`, delta: dv });
+  L.push({ t: `--> Triangle count changed from ${fmt(r.counts.trisBefore)} to ${fmt(r.counts.trisAfter)} (${sg(dt)})`, delta: dt });
+  if (a.printable && !a.selfIntersections) L.push({ t: '-> Ready for download.', cls: 'head' });
+  else if (a.printable) L.push({ t: '-> Ready for download. Overlapping triangles remain; most slicers handle them, "Rebuild as solid" removes them for good.', cls: 'head' });
+  else L.push({ t: '-> Repaired as far as possible. Inspect the highlighted areas, or use "Rebuild as solid" for a guaranteed clean result.', cls: 'head warn' });
+  return L;
+}
+function esc(s) { return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function renderConsole(lines) {
+  const el = $('#console');
+  el.innerHTML = lines.map((l) => {
+    if (l.key) {
+      const num = `<b class="${l.cls}">${fmt(l.n)}</b>`;
+      return `<div class="ln">--&gt; ${num} ${esc(l.label)} <span class="q" tabindex="0" data-tip="${esc(HELP[l.key])}">(?)</span></div>`;
+    }
+    if (l.delta !== undefined) {
+      const m = l.t.match(/^(.*\()([^)]*)(\))$/);
+      const cls = l.delta > 0 ? 'ok' : l.delta < 0 ? 'bad' : '';
+      return `<div class="ln">${esc(m[1])}<b class="${cls}">${esc(m[2])}</b>${esc(m[3])}</div>`;
+    }
+    return `<div class="ln ${l.cls || ''}">${esc(l.t)}</div>`;
+  }).join('');
+  el.scrollTop = 0;
+}
+function renderProgress(job) {
+  const el = $('#console');
+  const pct = Math.round((job.progress || 0) * 100);
+  el.innerHTML = `<div class="ln head">-&gt; Loading ${esc(job.name)}</div><div class="ln head">-&gt; ${esc(job.stage || 'Working')}…</div><div class="ln">-&gt; Repairing: <b class="ok">${pct.toFixed(0)}%</b></div><div class="bar"><i style="width:${pct}%"></i></div>`;
+}
+
+/* ------------------------------------------------------------------ rendering */
+function renderJobs() {
+  const ul = $('#jobs'); ul.innerHTML = '';
+  for (const j of jobs) {
+    const li = document.createElement('li'); li.className = 'job' + (j === current ? ' sel' : '');
+    let chip = '', cls = '';
+    if (j.status === 'queued') { chip = 'queued'; cls = 'muted'; }
+    else if (j.status === 'running') { chip = Math.round((j.progress || 0) * 100) + '%'; cls = 'run'; }
+    else if (j.status === 'error') { chip = 'failed'; cls = 'bad'; }
+    else { const a = j.result.after; chip = a.printable ? (j.result.solid ? 'solid' : 'watertight') : 'check'; cls = a.printable ? 'ok' : 'warn'; }
+    const tri = j.result ? fmt(j.result.counts.trisAfter) + ' tris' : (j.size > 1048576 ? (j.size / 1048576).toFixed(1) + ' MB' : Math.round(j.size / 1024) + ' KB');
+    li.innerHTML = `<span class="jn" title="${esc(j.name)}">${esc(j.name)}</span><span class="jm">${tri}</span><span class="chip ${cls}">${chip}</span>`;
+    li.addEventListener('click', () => { current = j; renderJobs(); renderCurrent(); });
+    ul.appendChild(li);
+  }
+  $('#batch').hidden = jobs.length < 2;
+}
+function updateBatch() { $('#dlAll').disabled = !jobs.some((j) => j.status === 'done'); }
+
+function renderCurrent() {
+  const j = current;
+  const stage = $('#stage');
+  if (!j) { stage.classList.add('empty'); return; }
+  stage.classList.remove('empty');
+  $('#jobName').textContent = j.name;
+  $('#jobName').title = j.name;
+  const pill = $('#verdict'); const meta = $('#jobMeta');
+  $('#dl').disabled = j.status !== 'done'; $('#dlReport').disabled = j.status !== 'done';
+  if (j.status === 'error') { pill.textContent = 'could not read'; pill.className = 'pill bad'; meta.textContent = j.error; $('#console').innerHTML = `<div class="ln head">-&gt; ${esc(j.name)}</div><div class="ln bad">--&gt; ${esc(j.error)}</div>`; renderStats(null); if (viewer) viewer.setMesh(null); return; }
+  if (j.status !== 'done') { pill.textContent = j.status === 'running' ? 'repairing' : 'queued'; pill.className = 'pill run'; meta.textContent = j.sample ? 'generated sample with every defect type' : ''; renderProgress(j); renderStats(null); if (viewer) viewer.setMesh(null); return; }
+  const a = j.result.after, b = j.result.before;
+  if (j.result.solid && a.printable) { pill.textContent = 'rebuilt solid'; pill.className = 'pill ok'; }
+  else if (a.printable && a.degenerateFaces === 0) { pill.textContent = 'watertight'; pill.className = 'pill ok'; }
+  else if (a.printable) { pill.textContent = 'watertight · hairline slivers'; pill.className = 'pill ok'; }
+  else { pill.textContent = 'needs attention'; pill.className = 'pill warn'; }
+  const changed = !(b.printable && j.result.log.length <= 1);
+  $('#solidBtn').hidden = !!(j.result.solid) || (a.printable && !a.selfIntersections);
+  meta.textContent = (j.sample ? 'Generated sample with every defect type · ' : '') + (changed ? `${Math.round(j.result.ms)} ms · ${j.result.iterations} pass${j.result.iterations === 1 ? '' : 'es'}` : 'already clean, normals recomputed');
+  renderConsole(j.lines);
+  renderStats(j.result);
+  renderViewer();
+}
+
+function renderStats(r) {
+  const el = $('#stats');
+  if (!r) { el.innerHTML = ''; return; }
+  const s = r.after.stats, b = r.before.stats; const bb = s.bbox;
+  const mm = (v) => v >= 1000 ? (v / 1000).toFixed(2) + ' m' : v.toFixed(2) + ' mm';
+  const vol = (v) => v >= 1000 ? (v / 1000).toFixed(2) + ' cm³' : v.toFixed(2) + ' mm³';
+  const area = (v) => v >= 100 ? (v / 100).toFixed(2) + ' cm²' : v.toFixed(2) + ' mm²';
+  const tiles = [
+    ['Size', `${mm(bb.size[0])} × ${mm(bb.size[1])} × ${mm(bb.size[2])}`, 'units as stored (mm assumed)'],
+    ['Volume', s.watertight ? vol(s.volume) : '—', s.watertight ? `${r.after.stats.closedShells} closed shell${r.after.stats.closedShells === 1 ? '' : 's'}` : 'open surface'],
+    ['Surface', area(s.area), ''],
+    ['Triangles', fmt(s.triangles), `${fmt(s.vertices)} vertices`],
+    ['Shells', fmt(r.after.shells), r.after.shells > 1 ? `${fmt(r.after.disjointShells)} extra` : 'single body'],
+    ['Genus', s.genus === null ? '—' : fmt(Math.max(0, Math.round(s.genus))), s.genus === null ? 'needs a closed manifold' : 'through-holes per shell'],
+  ];
+  el.innerHTML = tiles.map(([k, v, sub]) => `<div class="stat"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span><span class="s">${esc(sub)}</span></div>`).join('');
+}
+
+function renderViewer() {
+  if (!viewer || !current || current.status !== 'done') return;
+  const r = current.result;
+  const useRepaired = viewMode === 'repaired';
+  const snap = useRepaired ? r.repaired : r.original; const an = useRepaired ? r.after : r.before;
+  const fill = [], flipped = [];
+  if (useRepaired) for (let f = 0; f < snap.nf; f++) { if (snap.flags[f] & E.FLAG_FILL) fill.push(f); }
+  viewer.setMesh(snap, {
+    selfxFaces: an.selfIntersectingFaces,
+    fillFaces: fill,
+    invertedFaces: useRepaired ? [] : an.invertedFaceList,
+    degenerateFaces: an.degenerateFaceList,
+    duplicateFaces: useRepaired ? [] : an.duplicateFaceList,
+    nakedEdges: an.nakedEdgeList,
+    nonManifoldEdges: an.nonManifoldEdgeList,
+  });
+  viewer.fit();
+  $('#legend').innerHTML = legendFor(an, useRepaired, fill.length);
+}
+function legendFor(an, repaired, fills) {
+  const items = [];
+  if (an.nakedEdges) items.push(['naked', `${fmt(an.nakedEdges)} naked edges`]);
+  if (an.nonManifoldEdges) items.push(['nm', `${fmt(an.nonManifoldEdges)} non-manifold edges`]);
+  if (!repaired && an.invertedNormals) items.push(['inv', `${fmt(an.invertedNormals)} inverted faces`]);
+  if (an.degenerateFaces || (!repaired && an.duplicateFaces)) items.push(['deg', `${fmt(an.degenerateFaces + (repaired ? 0 : an.duplicateFaces))} degenerate / duplicate`]);
+  if (an.selfIntersections) items.push(['selfx', `${fmt(an.selfIntersections)} self-intersecting pairs`]);
+  if (repaired && fills) items.push(['fill', `${fmt(fills)} filled triangles`]);
+  items.push(['back', 'inside of the surface']);
+  return items.map(([c, t]) => `<span><i class="sw ${c}"></i>${esc(t)}</span>`).join('');
+}
+
+/* ------------------------------------------------------------------ downloads */
+let downloadsCap = null, capChecked = false;
+async function sandboxDownloads() {
+  if (capChecked) return downloadsCap; capChecked = true;
+  try { if (window.claude && typeof window.claude.use === 'function') downloadsCap = await window.claude.use('downloads'); } catch (e) { downloadsCap = null; }
+  return downloadsCap;
+}
+function baseName(n) { return n.replace(/\.stl$/i, ''); }
+function repairedBytes(job) {
+  const s = job.result.repaired; const ascii = job.options && job.options.ascii;
+  if (ascii) return new TextEncoder().encode(E.exportAsciiSTL(s.V, s.F, s.nf, baseName(job.name)));
+  return new Uint8Array(E.exportBinarySTL(s.V, s.F, s.nf, baseName(job.name)));
+}
+function reportText(job) { return job.lines.map((l) => l.t).join('\n') + '\n'; }
+async function saveBytes(filename, bytes, mime) {
+  const cap = await sandboxDownloads();
+  if (cap) {
+    // the artifact sandbox only allows certain file types; STL travels inside a zip
+    let name = filename, data = bytes;
+    if (!/\.(zip|txt)$/i.test(filename)) { name = filename.replace(/\.[^.]+$/, '') + '.zip'; data = E.makeZip([{ name: filename, data: bytes }]); }
+    try { await cap.save({ filename: name, data: new Blob([data]) }); toast(`Saved ${name}`); }
+    catch (err) { if (err && err.code === 'declined') return; toast('Could not save: ' + (err && err.message || err), true); }
+    return;
+  }
+  const blob = new Blob([bytes], { type: mime || 'application/octet-stream' });
+  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+let toastTimer = null;
+function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (bad ? ' bad' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.className = 'toast'; }, 3200); }
+
+/* ------------------------------------------------------------------ wiring */
+function init() {
+  // fonts: swap to fallback silently if blocked (nothing to do)
+  const canvas = $('#gl');
+  viewer = MeshViewer.create(canvas);
+  if (!viewer) { $('#viewerWrap').classList.add('nogl'); $('#glMsg').textContent = 'WebGL is not available in this browser, the preview is disabled. Repairs still work.'; }
+  const applyTheme = () => {
+    if (!viewer) return;
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark' || (document.documentElement.getAttribute('data-theme') !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    viewer.setColors({ body: dark ? '#b9c3cf' : '#cfd6de', wire: dark ? '#6b7684' : '#3d4653' });
+  };
+  applyTheme();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+  new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  $('#file').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+  const drop = $('#drop');
+  const over = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  const leave = () => drop.classList.remove('over');
+  for (const el of [drop, document.body]) { el.addEventListener('dragover', over); el.addEventListener('dragleave', leave); el.addEventListener('drop', (e) => { e.preventDefault(); leave(); if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }); }
+  $('#sampleBtn').addEventListener('click', loadSample);
+  $('#dl').addEventListener('click', () => { if (current && current.status === 'done') saveBytes(baseName(current.name) + '_fixed.stl', repairedBytes(current), 'model/stl'); });
+  $('#dlReport').addEventListener('click', () => { if (current && current.status === 'done') saveBytes(baseName(current.name) + '_report.txt', new TextEncoder().encode(reportText(current)), 'text/plain'); });
+  $('#dlAll').addEventListener('click', () => {
+    const done = jobs.filter((j) => j.status === 'done'); if (!done.length) return;
+    const entries = [];
+    for (const j of done) { entries.push({ name: baseName(j.name) + '_fixed.stl', data: repairedBytes(j) }); entries.push({ name: baseName(j.name) + '_report.txt', data: new TextEncoder().encode(reportText(j)) }); }
+    saveBytes('repaired-stl.zip', E.makeZip(entries), 'application/zip');
+  });
+  $('#clearBtn').addEventListener('click', () => { const keep = jobs.filter((j) => j.status === 'running'); jobs.length = 0; jobs.push(...keep); queue.length = 0; current = keep[0] || null; renderJobs(); renderCurrent(); updateBatch(); if (!current) { if (viewer) viewer.setMesh(null); $('#stage').classList.add('empty'); } });
+  for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => { viewMode = b.dataset.view; for (const x of document.querySelectorAll('[data-view]')) x.classList.toggle('on', x === b); renderViewer(); });
+  for (const c of document.querySelectorAll('[data-show]')) c.addEventListener('change', () => { if (viewer) viewer.setShow(c.dataset.show, c.checked); });
+  $('#fitBtn').addEventListener('click', () => viewer && viewer.fit());
+  $('#solidBtn').addEventListener('click', () => { if (!current || current.status === 'running') return; $('#optSolid').checked = true; current.status = 'queued'; current.result = null; queue.unshift(current); renderJobs(); renderCurrent(); runNext(); });
+  $('#rerun').addEventListener('click', () => { if (!current || current.status === 'running') return; current.status = 'queued'; current.result = null; queue.unshift(current); renderJobs(); renderCurrent(); runNext(); });
+
+  sandboxDownloads().then((cap) => { if (cap) { const n = document.querySelector('.actions .note'); n.textContent = 'Hosted version: files are saved as .zip (the page sandbox only allows a few file types). Normals are recomputed on export.'; } });
+  makeWorker().then((w) => { worker = w; workerReady = true; $('#engineNote').textContent = w ? 'Runs in a background thread · nothing leaves your computer' : 'Runs in this tab · nothing leaves your computer'; runNext(); });
+
+  const params = new URLSearchParams(location.search);
+  const loadUrl = params.get('load');
+  if (loadUrl) {
+    fetch(loadUrl).then((r) => r.arrayBuffer()).then((buf) => { const name = loadUrl.split('/').pop() || 'model.stl'; addFiles([new File([buf], name)]); }).catch((e) => toast('Could not load ' + loadUrl + ': ' + e.message, true));
+  } else loadSample();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+
+</script>

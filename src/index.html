@@ -1,0 +1,234 @@
+<!--BEGIN-DOC--><!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--END-DOC-->
+<title>Watertight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f1f2ef; --surface: #ffffff; --surface-2: #f7f8f5; --ink: #171a1f; --muted: #5f6873; --line: #d8dbd4; --line-strong: #b8bdb5;
+  --accent: #2b5fd9; --accent-ink: #ffffff; --accent-soft: #e4ebfb;
+  --ok: #1f9d55; --warn: #c97a12; --bad: #d64531;
+  --console-bg: #111417; --console-ink: #d9dfe5; --console-dim: #8792a0; --console-ok: #4ade80; --console-bad: #ff6b5b; --console-warn: #f5b74a;
+  --sw-naked: #ff3b2f; --sw-nm: #e23bff; --sw-inv: #f0a41b; --sw-deg: #ffd21f; --sw-fill: #3ec46d; --sw-back: #e2604a; --sw-selfx: #22c7e6;
+  --font-display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 6px; --shadow: 0 1px 2px rgba(20, 24, 30, .06), 0 6px 20px -12px rgba(20, 24, 30, .25);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1114; --surface: #161a1f; --surface-2: #1b2026; --ink: #e6e9ed; --muted: #8c96a3; --line: #262c34; --line-strong: #3a424c;
+    --accent: #6d8fff; --accent-ink: #0b1220; --accent-soft: #1d2740;
+    --ok: #3ccf72; --warn: #f0a82e; --bad: #ff6b5b;
+    --console-bg: #0a0c0f; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1114; --surface: #161a1f; --surface-2: #1b2026; --ink: #e6e9ed; --muted: #8c96a3; --line: #262c34; --line-strong: #3a424c;
+  --accent: #6d8fff; --accent-ink: #0b1220; --accent-soft: #1d2740;
+  --ok: #3ccf72; --warn: #f0a82e; --bad: #ff6b5b;
+  --console-bg: #0a0c0f; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, .q:focus-visible, .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+.app { display: grid; grid-template-columns: 340px minmax(0, 1fr); min-height: 100vh; }
+@media (max-width: 960px) { .app { grid-template-columns: 1fr; } }
+
+/* ---- rail ---- */
+.rail { border-right: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; gap: 18px; padding: 22px 20px 26px; }
+@media (max-width: 960px) { .rail { border-right: 0; border-bottom: 1px solid var(--line); } }
+.brand h1 { font-size: 30px; font-weight: 700; letter-spacing: .01em; line-height: 1; }
+.brand h1 small { display: block; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.brand p { margin: 8px 0 0; color: var(--muted); font-size: 14px; max-width: 32ch; }
+.drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; padding: 26px 16px; border: 1.5px dashed var(--line-strong); border-radius: var(--radius); background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s; position: relative; }
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.drop strong { font-family: var(--font-display); font-size: 19px; font-weight: 600; }
+.drop span { color: var(--muted); font-size: 13px; }
+.drop .btnlike { margin-top: 8px; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); }
+.jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.jobs:empty { display: none; }
+.job { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius); border: 1px solid transparent; cursor: pointer; font-size: 14px; }
+.job:hover { background: var(--surface-2); }
+.job.sel { border-color: var(--line); background: var(--surface-2); }
+.job .jn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.job .jm { color: var(--muted); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chip { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.chip.run { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.batch { display: flex; gap: 8px; }
+.btn { padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface); font-weight: 500; font-size: 14px; }
+.btn:hover { background: var(--surface-2); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.07); background: var(--accent); }
+.btn.sm { padding: 5px 10px; font-size: 13px; }
+.opts summary { cursor: pointer; font-family: var(--font-display); font-weight: 600; font-size: 16px; padding: 4px 0; list-style: none; display: flex; align-items: center; gap: 8px; }
+.opts summary::before { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-left: 2px; }
+.opts[open] summary::before { transform: rotate(45deg); }
+.opts .grid { display: grid; grid-template-columns: 1fr auto; gap: 9px 12px; align-items: center; margin-top: 10px; font-size: 14px; }
+.opts label { display: contents; }
+.opts label > span { color: var(--ink); }
+.opts label > span small { display: block; color: var(--muted); font-size: 12px; }
+.opts select, .opts input[type=number] { padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); width: 108px; }
+.opts input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; justify-self: end; }
+.rail footer { margin-top: auto; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.rail footer a { color: var(--accent); }
+
+/* ---- stage ---- */
+.stage { padding: 22px 26px 30px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.jobhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.jobhead h2 { font-size: 24px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pill { font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; color: var(--muted); border: 1px solid var(--line-strong); }
+.pill.ok { color: var(--ok); border-color: var(--ok); }
+.pill.warn { color: var(--warn); border-color: var(--warn); }
+.pill.bad { color: var(--bad); border-color: var(--bad); }
+.pill.run { color: var(--accent); border-color: var(--accent); }
+.meta { color: var(--muted); font-size: 13.5px; }
+.jobhead .spacer { flex: 1; }
+.panes { display: grid; grid-template-columns: minmax(360px, 5fr) minmax(320px, 6fr); gap: 16px; align-items: stretch; }
+@media (max-width: 1180px) { .panes { grid-template-columns: 1fr; } }
+.console-wrap { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.console { margin: 0; background: var(--console-bg); color: var(--console-ink); font-family: var(--font-mono); font-size: 13.5px; line-height: 1.55; padding: 16px 18px; border-radius: var(--radius); box-shadow: var(--shadow); min-height: 420px; max-height: 620px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.console .ln { display: block; }
+.console .head { color: #ffffff; }
+.console .warn { color: var(--console-warn); }
+.console .bad { color: var(--console-bad); }
+.console b { font-weight: 600; }
+.console b.ok { color: var(--console-ok); } .console b.bad { color: var(--console-bad); } .console b.warn { color: var(--console-warn); }
+.console .q { color: var(--console-dim); cursor: help; position: relative; }
+.console .q:hover::after, .console .q:focus::after { content: attr(data-tip); position: absolute; left: 0; top: 1.6em; z-index: 5; width: 300px; max-width: 70vw; background: #1e242b; color: #e5eaf0; border: 1px solid #333c47; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; line-height: 1.4; white-space: normal; font-family: var(--font-body); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.console .bar { height: 6px; background: #22282f; border-radius: 3px; margin-top: 10px; overflow: hidden; }
+.console .bar i { display: block; height: 100%; background: var(--console-ok); transition: width .25s; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.actions .note { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+.viewer-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vtools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13.5px; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
+.seg button { padding: 5px 12px; border: 0; background: transparent; color: var(--muted); font-weight: 500; }
+.seg button.on { background: var(--ink); color: var(--bg); }
+.vtools label { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.vtools input { accent-color: var(--accent); margin: 0; }
+.vtools .fit { margin-left: auto; }
+.canvas-box { position: relative; background: linear-gradient(180deg, var(--surface-2), var(--surface)); border: 1px solid var(--line); border-radius: var(--radius); min-height: 420px; overflow: hidden; }
+.canvas-box canvas { display: block; width: 100%; height: 100%; position: absolute; inset: 0; touch-action: none; }
+.canvas-box .hint { position: absolute; left: 10px; bottom: 8px; font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); pointer-events: none; }
+.nogl canvas { display: none; }
+.nogl #glMsg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 20px; text-align: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.sw.naked { background: var(--sw-naked); } .sw.nm { background: var(--sw-nm); } .sw.inv { background: var(--sw-inv); } .sw.deg { background: var(--sw-deg); } .sw.fill { background: var(--sw-fill); } .sw.back { background: var(--sw-back); } .sw.selfx { background: var(--sw-selfx); }
+.stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1180px) { .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stats:empty { display: none; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stat .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-family: var(--font-display); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .s { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage.empty .jobhead, .stage.empty .panes, .stage.empty .stats { display: none; }
+.stage .placeholder { display: none; color: var(--muted); }
+.stage.empty .placeholder { display: block; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 20px); opacity: 0; background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 999px; font-size: 14px; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 20; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.bad { background: var(--bad); color: #fff; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<!--BEGIN-DOC--></head>
+<body><!--END-DOC-->
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <h1><small>STL repair</small>Watertight</h1>
+      <p>Fixes STL files for 3D printing right here in your browser. No upload, no queue, no file size limit beyond your own memory.</p>
+    </div>
+    <label class="drop" id="drop">
+      <input type="file" id="file" multiple accept=".stl,model/stl,application/sla,application/octet-stream" aria-label="Choose STL files">
+      <strong>Drop .stl files here</strong>
+      <span>binary or ASCII · several at once is fine</span>
+      <span class="btnlike">Choose files</span>
+    </label>
+    <ul class="jobs" id="jobs"></ul>
+    <div class="batch" id="batch" hidden>
+      <button class="btn sm" id="dlAll">Download all (.zip)</button>
+      <button class="btn sm" id="clearBtn">Clear list</button>
+    </div>
+    <details class="opts">
+      <summary>Repair settings</summary>
+      <div class="grid">
+        <label><span>Close gaps up to<small>relative to model size, boundary vertices only</small></span>
+          <select id="optTol"><option value="off">off</option><option value="1e-6">tiny (1 ppm)</option><option value="1e-5" selected>normal (10 ppm)</option><option value="1e-4">loose (100 ppm)</option><option value="1e-3">very loose (0.1 %)</option></select></label>
+        <label><span>Fill holes</span><input type="checkbox" id="optFill" checked></label>
+        <label><span>Largest hole to fill<small>edges around the hole, 0 = no limit</small></span><input type="number" id="optMaxHole" min="0" step="1" value="0"></label>
+        <label><span>Enclosed shells become cavities<small>off: every shell faces outward</small></span><input type="checkbox" id="optCavities" checked></label>
+        <label><span>Remove zero-volume shells<small>flat double-sided sheets</small></span><input type="checkbox" id="optZero" checked></label>
+        <label><span>Remove small floating shells</span><input type="checkbox" id="optSmall"></label>
+        <label><span>Small means below<small>% of the largest shell's volume</small></span><input type="number" id="optSmallPct" min="0" step="0.1" value="0.1"></label>
+        <label><span>Rebuild as solid<small>resamples into one clean solid: no self-intersections, overlapping parts merged; corners rounded to one voxel</small></span><input type="checkbox" id="optSolid"></label>
+        <label><span>Solid resolution<small>voxels along the longest side</small></span><select id="optSolidRes"><option value="100">100 (fast)</option><option value="150">150</option><option value="200" selected>200</option><option value="250">250</option><option value="320">320 (slow, ~1 GB RAM)</option></select></label>
+        <label><span>Output format</span><select id="optFormat"><option value="binary" selected>binary STL</option><option value="ascii">ASCII STL</option></select></label>
+      </div>
+    </details>
+    <footer>
+      <span id="engineNote">Starting…</span><br>
+      Checks the same eight things the usual online fixers do, then verifies its own result. <a href="#" id="sampleBtn">Load the sample part</a> to see every defect type.
+    </footer>
+  </aside>
+  <main class="stage empty" id="stage">
+    <p class="placeholder">Drop an STL file to start.</p>
+    <div class="jobhead">
+      <h2 id="jobName">—</h2>
+      <span class="pill" id="verdict">—</span>
+      <span class="meta" id="jobMeta"></span>
+      <span class="spacer"></span>
+      <button class="btn sm" id="rerun" title="Repair again with the current settings">Re-run with current settings</button>
+    </div>
+    <section class="panes">
+      <div class="console-wrap">
+        <pre class="console" id="console" aria-live="polite"></pre>
+        <div class="actions">
+          <button class="btn primary" id="dl" disabled>Download fixed STL</button>
+          <button class="btn" id="dlReport" disabled>Save report</button>
+          <button class="btn" id="solidBtn" hidden title="Resample into one clean solid">Rebuild as solid</button>
+          <span class="note">Normals are recomputed from winding on export.</span>
+        </div>
+      </div>
+      <div class="viewer-wrap" id="viewerWrap">
+        <div class="vtools">
+          <span class="seg"><button data-view="original">Original</button><button data-view="repaired" class="on">Repaired</button></span>
+          <label><input type="checkbox" data-show="problems" checked> problems</label>
+          <label><input type="checkbox" data-show="fills" checked> fills</label>
+          <label><input type="checkbox" data-show="wire"> wireframe</label>
+          <button class="btn sm fit" id="fitBtn">Fit</button>
+        </div>
+        <div class="canvas-box">
+          <canvas id="gl"></canvas>
+          <div id="glMsg"></div>
+          <div class="hint">drag: orbit · wheel: zoom · right-drag: pan · double-click: fit</div>
+        </div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </section>
+    <section class="stats" id="stats"></section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<!--SCRIPTS-->
+<script id="engine-src" src="engine.js"></script>
+<script src="viewer.js"></script>
+<script src="app.js"></script>
+<!--/SCRIPTS-->
+<!--BEGIN-DOC--></body>
+</html><!--END-DOC-->

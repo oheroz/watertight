@@ -1,0 +1,75 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>debug</title></head><body><pre id="out"></pre>
+<script>document.write('<script src="../src/engine.js?ts=' + Date.now() + '"><\/script>')</script>
+<script>
+const E = STLRepair; const out = document.getElementById('out');
+const log = (s) => { out.textContent += s + '\n'; };
+const sum = (a) => `naked=${a.nakedEdges} nm=${a.nonManifoldEdges} holesP=${a.planarHoles} holesNP=${a.nonPlanarHoles} inv=${a.invertedNormals} dup=${a.duplicateFaces} deg=${a.degenerateFaces} shells=${a.shells} conflicts=${a.orientationConflicts} V=${a.stats.vertices} T=${a.stats.triangles} vol=${a.stats.volume.toFixed(1)}`;
+window.__done = false;
+(async () => {
+  const name = new URLSearchParams(location.search).get('f') || 'y60.stl';
+  let parsed;
+  if (name === 'demo') parsed = E.synth.demoPart();
+  else { const buf = await (await fetch('data/' + name)).arrayBuffer(); parsed = E.parseSTL(buf); }
+  const trace = []; E._dbg = trace;
+  const r = E.repair(parsed, { trace });
+  log(`${name}: ${r.ms.toFixed(0)} ms`);
+  for (const t of trace) log('  ' + t);
+  log('before: ' + sum(r.before)); log('after : ' + sum(r.after));
+  for (const l of r.log) log('log: ' + l.t);
+  // inspect remaining holes on the repaired mesh
+  const m = new E.Mesh(1, 1); m.V = r.repaired.V; m.nv = r.repaired.nv; m.F = r.repaired.F; m.nf = r.repaired.nf; m.src = r.repaired.src; m.flags = r.repaired.flags; m.dead = new Uint8Array(m.nf); m.ndead = 0;
+  const topo = E.buildTopology(m);
+  const bl = E._boundaryLoops(m, topo);
+  log(`remaining loops: ${bl.loops.length}, broken: ${bl.broken}`);
+  for (let i = 0; i < Math.min(30, bl.loops.length); i++) {
+    const l = bl.loops[i]; const g = E._loopGeometry(m.V, l);
+    log(`  loop ${i}: n=${l.length} extent=${g.extent.toExponential(2)} perim=${g.perimeter.toExponential(2)} area2=${g.area2.toExponential(2)} maxDev=${g.maxDev.toExponential(2)} ratio=${(g.area2 / (g.perimeter * g.perimeter)).toExponential(2)}`);
+    if (l.length <= 8) log('     ' + Array.from(l).map(v => `(${m.V[v*3].toFixed(4)},${m.V[v*3+1].toFixed(4)},${m.V[v*3+2].toFixed(4)})`).join(' '));
+    if (l.length <= 8) log('     slots: ' + bl.loopSlots[i].map(s => { const f = (s/3)|0; return `f${f}=[${m.F[f*3]},${m.F[f*3+1]},${m.F[f*3+2]}]`; }).join(' ') + '  verts: ' + Array.from(l).join(','));
+  }
+  {
+    const tolS = Math.max(r.tolerance, 4 * Math.max(4e-7 * r.diag, 1e-12));
+    const n = E._fixTJunctions(m, topo, tolS);
+    log(`stitch attempt with tol ${tolS.toExponential(3)}: ${n} splits; alive faces ${m.alive()}`);
+    m.compact(); const topo2 = E.buildTopology(m); const bl2 = E._boundaryLoops(m, topo2); log(`loops after stitch: ${bl2.loops.length}`);
+  }
+  // inverted faces: which components, and is the decision stable?
+  {
+    const topoI = E.buildTopology(m);
+    const ctxI = { tol: Math.max(4e-7 * r.diag, 1e-12), storedNormals: null };
+    const a1 = E.analyze(m, topoI, ctxI), a2 = E.analyze(m, topoI, ctxI);
+    log(`inverted on final mesh: ${a1.invertedNormals} / second run ${a2.invertedNormals}`);
+    if (a1.invertedNormals) {
+      const comps = E._faceComponents(m, topoI.opp);
+      const flips = E._orientationFlips(m, topoI.opp);
+      const co = E._componentOrientation(m, topoI.opp, comps.comp, comps.count, flips.flip, null, false);
+      const per = new Map();
+      for (const f of a1.invertedFaceList) { const c = comps.comp[f]; per.set(c, (per.get(c) || 0) + 1); }
+      let shown = 0;
+      for (const [c, n] of per) { if (shown++ > 8) break; log(`  comp ${c}: ${n} inverted of ${comps.sizes[c]} faces, closed=${co.closed[c]} vol=${(co.vol[c]/6).toExponential(3)} area=${co.area[c].toExponential(3)} depth=${co.depth[c]} compFlip=${co.compFlip[c]} localFlip=${flips.flip[a1.invertedFaceList[0]]}`); }
+    }
+  }
+  // remaining non-manifold edges
+  {
+    const topo3 = E.buildTopology(m);
+    log(`remaining nm edges: ${topo3.nmEdges.length}`);
+    for (const e of topo3.nmEdges.slice(0, 8)) {
+      const parts = [];
+      for (let s2 = topo3.eFirst[e]; s2 >= 0; s2 = topo3.sNext[s2]) { const f = (s2/3)|0; parts.push(`f${f}[${m.F[f*3]},${m.F[f*3+1]},${m.F[f*3+2]}] flags=${m.flags[f]} src=${m.src[f]}`); }
+      const a = topo3.eLo[e], b = topo3.eHi[e];
+      log(`  edge ${a}-${b} len=${Math.hypot(m.V[a*3]-m.V[b*3], m.V[a*3+1]-m.V[b*3+1], m.V[a*3+2]-m.V[b*3+2]).toExponential(2)}: ` + parts.join(' | '));
+    }
+  }
+  // remaining degenerate faces
+  const dg = E._classifyDegenerate(m, Math.max(1e-6 * r.diag, 1e-12));
+  log(`remaining degenerate: needles=${dg.needles.length / 3} caps=${dg.caps.length / 2} degTol=${(1e-6 * r.diag).toExponential(2)}`);
+  for (let i = 0; i < Math.min(10, dg.caps.length); i += 2) {
+    const f = dg.caps[i]; const vs = [m.F[f*3], m.F[f*3+1], m.F[f*3+2]];
+    log('  cap ' + vs.map(v => `(${m.V[v*3].toFixed(5)},${m.V[v*3+1].toFixed(5)},${m.V[v*3+2].toFixed(5)})`).join(' ') + ' flags=' + m.flags[f]);
+    // neighbours
+    for (let k = 0; k < 3; k++) { const e = topo.sEdge[f*3+k]; log(`     edge ${k}: count=${topo.eCnt[e]}`); }
+  }
+  window.__done = true;
+})();
+</script></body></html>

@@ -39,6 +39,7 @@ function readOptions() {
     smallShellFraction: Math.max(0, parseFloat($('#optSmallPct').value) || 0) / 100,
     cavities: $('#optCavities').checked,
     mergeParts: $('#optMerge').checked,
+    mergeTimeLimit: parseInt($('#optMergeTime').value, 10) || 0,
     removeInternalParts: $('#optInternal').checked,
     fillHollows: $('#optHollow').checked ? (parseFloat($('#optHollowPct').value) || 0.5) / 100 : 0,
     solidify: $('#optSolid').checked,

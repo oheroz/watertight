@@ -5,6 +5,7 @@
 
    -o, --output <file>   where to write the repaired STL (default: <input>_fixed.stl)
    --no-merge            keep overlapping parts as separate shells
+   --merge-time <s>      give up merging after this many seconds (default 120, 0 = no limit)
    --keep-internal       keep parts that are sealed inside other parts
    --fill-hollows [pct]  solid inside: fill hollows that open only through gaps narrower than pct % of the
                          model's diagonal (default 0.5)
@@ -21,7 +22,7 @@ const E = require('../src/engine.js');
 
 function usage(msg) {
   if (msg) console.error(msg + '\n');
-  console.error(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 16).join('\n').replace(/^\/\* |\*\/$/gm, ''));
+  console.error(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 17).join('\n').replace(/^\/\* |\*\/$/gm, ''));
   process.exit(msg ? 1 : 0);
 }
 
@@ -32,6 +33,7 @@ for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '-o' || a === '--output') output = args[++i];
   else if (a === '--no-merge') opts.mergeParts = false;
+  else if (a === '--merge-time') { opts.mergeTimeLimit = parseFloat(args[++i]); if (!(opts.mergeTimeLimit >= 0)) usage('--merge-time needs a number of seconds'); }
   else if (a === '--keep-internal') opts.removeInternalParts = false;
   else if (a === '--fill-hollows') { opts.fillHollows = 0.005; if (args[i + 1] && /^[\d.]+$/.test(args[i + 1])) opts.fillHollows = parseFloat(args[++i]) / 100; }
   else if (a === '--solid') { opts.solidify = true; if (args[i + 1] && /^\d+$/.test(args[i + 1])) opts.solidifyResolution = parseInt(args[++i], 10); }
@@ -74,7 +76,7 @@ lines.push(clean ? '-> Ready for printing.' : a.printable ? '-> Watertight; over
 const report = lines.join('\n') + '\n';
 
 if (json) {
-  console.log(JSON.stringify({ input, output: dry ? null : output, before: pick(b), after: pick(a), ms: Math.round(r.ms), log: r.log.map((l) => l.t) }, null, 2));
+  console.log(JSON.stringify({ input, output: dry ? null : output, before: pick(b), after: pick(a), ms: Math.round(r.ms), mergeSkipped: r.mergeSkipped, log: r.log.map((l) => l.t) }, null, 2));
 } else process.stdout.write(report);
 function pick(x) { return { naked: x.nakedEdges, holes: x.planarHoles + x.nonPlanarHoles, nonManifold: x.nonManifoldEdges, inverted: x.invertedNormals, duplicate: x.duplicateFaces, degenerate: x.degenerateFaces, shells: x.shells, selfIntersections: x.selfIntersections, watertight: x.stats.watertight, volume: x.stats.volume, triangles: x.stats.triangles }; }
 

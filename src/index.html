@@ -175,6 +175,7 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
         <label><span>Fill holes</span><input type="checkbox" id="optFill" checked></label>
         <label><span>Largest hole to fill<small>edges around the hole, 0 = no limit</small></span><input type="number" id="optMaxHole" min="0" step="1" value="0"></label>
         <label><span>Merge overlapping parts<small>one solid: parts cut exactly where they cross, hidden geometry removed</small></span><input type="checkbox" id="optMerge" checked></label>
+        <label><span>Merge time limit<small>parts that take longer stay separate shells</small></span><select id="optMergeTime"><option value="60">1 minute</option><option value="120" selected>2 minutes</option><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="0">no limit</option></select></label>
         <label><span>Remove hidden parts and voids<small>parts sealed inside others, gaps trapped between merged parts</small></span><input type="checkbox" id="optInternal" checked></label>
         <label><span>Keep cavities drawn inward<small>an inner shell modelled facing inward stays hollow</small></span><input type="checkbox" id="optCavities" checked></label>
         <label><span>Fill interior hollows<small>solid inside for printing: space reached only through gaps narrower than the width below is filled (a hollow grip, parts sealed inside parts); slower</small></span><input type="checkbox" id="optHollow"></label>

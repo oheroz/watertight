@@ -240,5 +240,44 @@ function runCases(E, run, check, sum) {
     const r = run('shallow groove, fill hollows', s.done(), { fillHollows: 0.05 });
     check('shallow groove kept', r.after.clean && r.after.shells === 1 && r.after.selfIntersections === 0 && Math.abs(r.after.stats.volume - (1000 - 0.3 * 10 * 0.3)) < 1e-4, sum(r.after) + ' vol=' + r.after.stats.volume);
   }
+  // ---- big faces crossed by many cuts, parts that cross themselves, and the merge budget ----
+  // a plate with posts sunk into its top face (lettering on a keychain): each top triangle is cut by hundreds of
+  // segments and gets the constrained Delaunay triangulation; the greedy one must give the same solid
+  const plate = (nPosts, seg) => {
+    const s = S.soup(); S.box(s, 0, 0, 0, 60, 30, 3);
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < nPosts; i++) S.cylinder(s, 4 + rnd() * 52, 4 + rnd() * 22, 1.5, 5 + rnd() * 2, 0.8 + rnd() * 1.5, seg);
+    return s.done();
+  };
+  {
+    const parsed = plate(12, 16);
+    const r = run('plate under 12 posts', parsed);
+    check('plate and posts merged into one solid', r.after.clean && r.after.shells === 1 && r.after.selfIntersections === 0 && !!r.merge, sum(r.after) + ' pairs=' + r.after.selfIntersections);
+    check('big cut faces triangulated by constrained Delaunay', !!r.merge && r.merge.stats.cdtFaces >= 2 && !r.merge.stats.failedFaces, JSON.stringify(r.merge && r.merge.stats.fail));
+    const rg = run('plate under 12 posts, greedy triangulation only', parsed, { cdtMinPoints: 1e9 });
+    check('same solid with the greedy triangulation', rg.after.clean && Math.abs(rg.after.stats.volume - r.after.stats.volume) < 1e-6 * r.after.stats.volume, rg.after.stats.volume + ' vs ' + r.after.stats.volume);
+    const rs = run('plate under 12 posts, pair cap', parsed, { mergeMaxPairs: 10 });
+    check('too many crossings: merge skipped, parts kept', rs.mergeSkipped && rs.mergeSkipped.reason === 'size' && rs.after.printable && rs.after.shells === 13 && rs.log.some((l) => /^Skipped merging/.test(l.t)), sum(rs.after) + ' ' + JSON.stringify(rs.mergeSkipped));
+    const rt = run('plate under 12 posts, no time', parsed, { mergeTimeLimit: 1e-6 });
+    check('out of time: merge skipped, parts kept', rt.mergeSkipped && rt.mergeSkipped.reason === 'time' && rt.after.printable && rt.after.shells === 13, sum(rt.after) + ' ' + JSON.stringify(rt.mergeSkipped));
+  }
+  {
+    // one closed tube along a (2,3) torus knot, thick enough to pass through itself: a single shell that crosses itself
+    const s = S.soup(), nu = 120, nv = 10, rr = 9;
+    const c = (t) => { const r = Math.cos(3 * t) + 2; return [r * Math.cos(2 * t) * 10, r * Math.sin(2 * t) * 10, -Math.sin(3 * t) * 10]; };
+    const rings = [];
+    for (let i = 0; i < nu; i++) {
+      const t = i / nu * 2 * Math.PI, p0 = c(t), p1 = c(t + 1e-4);
+      const T = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], lt = Math.hypot(...T); for (let k = 0; k < 3; k++) T[k] /= lt;
+      const N = [-T[1], T[0], 0], ln = Math.hypot(...N); for (let k = 0; k < 3; k++) N[k] /= ln;
+      const B = [T[1] * N[2] - T[2] * N[1], T[2] * N[0] - T[0] * N[2], T[0] * N[1] - T[1] * N[0]];
+      const ring = []; for (let j = 0; j < nv; j++) { const a = j / nv * 2 * Math.PI, ca = Math.cos(a) * rr, sa = Math.sin(a) * rr; ring.push([p0[0] + ca * N[0] + sa * B[0], p0[1] + ca * N[1] + sa * B[1], p0[2] + ca * N[2] + sa * B[2]]); }
+      rings.push(ring);
+    }
+    for (let i = 0; i < nu; i++) { const a = rings[i], b = rings[(i + 1) % nu]; for (let j = 0; j < nv; j++) { const k = (j + 1) % nv; s.quad(a[j], b[j], b[k], a[k]); } }
+    const r = run('knotted tube crossing itself', s.done());
+    check('one shell crossing itself', r.before.shells === 1 && r.before.selfIntersections > 0, sum(r.before) + ' pairs=' + r.before.selfIntersections);
+    check('self-crossing shell merged with itself', r.after.clean && r.after.shells === 1 && r.after.selfIntersections === 0 && !!r.merge && r.after.stats.volume < Math.abs(r.before.stats.signedVolume), sum(r.after) + ' pairs=' + r.after.selfIntersections + ' vol ' + r.after.stats.volume + ' vs ' + r.before.stats.signedVolume);
+  }
 }
 if (typeof module !== 'undefined') module.exports = runCases;

@@ -17,8 +17,8 @@ const HELP = {
   inverted: 'Triangles whose winding (front side) disagrees with their neighbours or points into the solid. They are flipped so every shell faces outward and cavities face inward.',
   duplicate: 'Triangles that use exactly the same three vertices. One copy is kept; an opposite-facing pair cancels out.',
   degenerate: 'Triangles with zero area: two identical corners, or three corners on a line. They are collapsed or removed and the gap is stitched.',
-  shells: 'Separate closed surfaces beyond the first one. Extra shells can be intended (a multi-part model) or noise (floating fragments). Zero-volume shells are removed.',
-  selfx: 'Pairs of triangles that pass through each other, e.g. overlapping parts exported as separate shells. Most slicers cope, but phantom walls or missing regions can appear. Topology repair cannot remove them; "Rebuild as solid" resamples the model into one clean solid.',
+  shells: 'Separate closed surfaces beyond the first one. Overlapping or touching parts are merged into one solid; parts hidden inside others and zero-volume shells are removed. Parts that stand apart stay separate.',
+  selfx: 'Pairs of triangles that pass through each other deeper than float precision, e.g. overlapping parts. Watertight merges overlapping parts exactly (cut where they cross, hidden geometry removed). If some remain, "Rebuild as solid" resamples the model into one clean solid.',
 };
 
 /* ------------------------------------------------------------------ state */
@@ -38,6 +38,10 @@ function readOptions() {
     removeSmallShells: $('#optSmall').checked,
     smallShellFraction: Math.max(0, parseFloat($('#optSmallPct').value) || 0) / 100,
     cavities: $('#optCavities').checked,
+    mergeParts: $('#optMerge').checked,
+    mergeTimeLimit: parseInt($('#optMergeTime').value, 10) || 0,
+    removeInternalParts: $('#optInternal').checked,
+    fillHollows: $('#optHollow').checked ? (parseFloat($('#optHollowPct').value) || 0.5) / 100 : 0,
     solidify: $('#optSolid').checked,
     solidifyResolution: parseInt($('#optSolidRes').value, 10) || 200,
     ascii: $('#optFormat').value === 'ascii',
@@ -162,7 +166,7 @@ function buildConsole(job) {
   L.push({ t: `--> Vertex count changed from ${fmt(r.counts.vertsBefore)} to ${fmt(r.counts.vertsAfter)} (${sg(dv)})`, delta: dv });
   L.push({ t: `--> Triangle count changed from ${fmt(r.counts.trisBefore)} to ${fmt(r.counts.trisAfter)} (${sg(dt)})`, delta: dt });
   if (a.printable && !a.selfIntersections) L.push({ t: '-> Ready for download.', cls: 'head' });
-  else if (a.printable) L.push({ t: '-> Ready for download. Overlapping triangles remain; most slicers handle them, "Rebuild as solid" removes them for good.', cls: 'head' });
+  else if (a.printable) L.push({ t: '-> Ready for download. Some triangles still cross (the part could not be merged exactly); most slicers handle this, "Rebuild as solid" removes it for good.', cls: 'head' });
   else L.push({ t: '-> Repaired as far as possible. Inspect the highlighted areas, or use "Rebuild as solid" for a guaranteed clean result.', cls: 'head warn' });
   return L;
 }
@@ -345,6 +349,9 @@ function init() {
   for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => { viewMode = b.dataset.view; for (const x of document.querySelectorAll('[data-view]')) x.classList.toggle('on', x === b); renderViewer(); });
   for (const c of document.querySelectorAll('[data-show]')) c.addEventListener('change', () => { if (viewer) viewer.setShow(c.dataset.show, c.checked); });
   $('#fitBtn').addEventListener('click', () => viewer && viewer.fit());
+  const applySection = () => { const ax = parseInt($('#secAxis').value, 10); $('#secPos').disabled = ax < 0; if (viewer) viewer.setSection(ax, $('#secPos').value / 1000); };
+  $('#secAxis').addEventListener('change', applySection);
+  $('#secPos').addEventListener('input', applySection);
   $('#solidBtn').addEventListener('click', () => { if (!current || current.status === 'running') return; $('#optSolid').checked = true; current.status = 'queued'; current.result = null; queue.unshift(current); renderJobs(); renderCurrent(); runNext(); });
   $('#rerun').addEventListener('click', () => { if (!current || current.status === 'running') return; current.status = 'queued'; current.result = null; queue.unshift(current); renderJobs(); renderCurrent(); runNext(); });
 

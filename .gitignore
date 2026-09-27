@@ -2,3 +2,5 @@ tests/corpus/
 tests/data/*.stl
 tests/corpus.json
 .claude/
+tests/out/
+__pycache__/

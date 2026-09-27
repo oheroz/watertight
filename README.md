@@ -11,6 +11,9 @@ for printing it can make a model solid inside: hollows that the outside only
 reaches through narrow gaps (a hollow grip with loose parts in it, parts sealed
 inside parts) are filled, while every outside surface keeps its triangles.
 
+That makes it work on models that were never meant to be printed, such as
+models exported from games: see [Printing models from games](#printing-models-from-games).
+
 ## Get it
 
 - **Use it online:** https://oheroz.github.io/watertight/ (the same single
@@ -28,6 +31,58 @@ queued and downloaded together as a zip.
 
 A generated sample part with every defect type loads on start so you can see
 what the report and the viewer look like.
+
+## Printing models from games
+
+Models exported from games (weapons, characters, props) are made to be drawn on
+screen, not printed. A game only renders the surface you can see, so its models
+are usually:
+
+- **many separate pieces pushed into each other**: a slide sitting in a frame,
+  a magazine in the grip, cartridges in the magazine, with their surfaces
+  crossing;
+- **open**: edges that never meet, holes where nobody will look, faces left out
+  where one piece covers another;
+- **hollow**: thin shells with empty space behind them, and loose parts inside.
+
+A slicer cannot make sense of that. Crossing surfaces and holes give broken or
+missing layers, and a hollow shell prints as a thin wall around nothing.
+
+Watertight turns such a model into one printable object:
+
+1. It closes the gaps and fills the holes of every piece, so each piece is a
+   closed shell.
+2. It merges all pieces into one solid with an exact boolean union: surfaces are
+   cut exactly where they cross, and everything hidden inside another piece is
+   dropped.
+3. With **Fill interior hollows** on, it fills the empty space inside (the
+   magazine well, the inside of a slide), so the model prints solid. The outside
+   keeps its original triangles, and real openings such as a barrel bore stay
+   open.
+
+Example: the Desert Eagle from Counter-Strike 2, exported as an STL of 18,269
+triangles, repaired with Fill interior hollows at a 1 % gap:
+
+| | Game model | After Watertight |
+| --- | ---: | ---: |
+| Separate pieces | 36 | 1 |
+| Naked edges | 1,193 | 0 |
+| Holes | 75 | 0 |
+| Crossing triangle pairs | 1,946 | 0 |
+| Degenerate faces | 2 | 0 |
+| Inside | magazine with cartridges, hollow slide | solid |
+
+The result passes the independent checker (`tools/verify_stl.py`), and no
+material of the original is lost (`tools/compare_solid.js`). The repair takes
+about a minute.
+
+Tips:
+
+- Start with the default gap width (0.5 %). If the viewer's section view still
+  shows a slit into a hollow, raise it to 1 %. On the Desert Eagle, 0.5 % left
+  a small notch at the base of the grip open; 1 % filled it.
+- An STL file stores shape only: the textures and colours of the game model are
+  not carried over.
 
 ## What it checks and fixes
 
@@ -75,6 +130,10 @@ to one voxel and features thinner than a voxel are lost, so it is an opt-in
 step, offered when the normal repair leaves something behind.
 
 ## Results on real files
+
+These counts are from the repair passes of version 1.0. Merging overlapping
+parts and filling hollows are newer; the table will be updated when the corpus
+has been re-run with them.
 
 Tested on 126 STL files from the wild: game assets, scans, CAD exports and AI
 generated meshes, 4 KB to 97 MB, up to 1.9 million triangles, 20.7 million

@@ -1,6 +1,12 @@
 # Changelog
 
-## 1.1.0 — unreleased
+## 2.0.0 — 2026-09-27
+
+Models that were never meant to be printed, such as models exported from games,
+come out as one printable object: overlapping, open, hollow pieces are closed,
+merged into one exact solid and, on request, filled solid inside. A Desert
+Eagle from Counter-Strike 2 (36 pieces, 1,193 naked edges, 75 holes, 1,946
+crossing triangle pairs) becomes one solid with no defects.
 
 - Overlapping parts are merged into one solid by an exact boolean union:
   coordinates on an integer grid, rational (BigInt) intersection points,

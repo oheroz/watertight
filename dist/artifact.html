@@ -2055,7 +2055,8 @@ function separateCoincidentVertices(mesh, maxAbs, diag) {
 }
 /* Test points just inside and just outside every part's surface (up to 40 per part, spread over its faces):
    "solid in the union" is winding >= 1 of the original parts, and the merged surface must say the same there.
-   Points closer to another surface than the step are skipped. */
+   Faces too small to put a test point beside are skipped. (Skipping points near other surfaces as well was tried on
+   synthetic hairline gaps: it let a few more merges through, one of them with 2 % of the volume missing.) */
 function unionAgrees(orig, merged, diag) {
   const W0 = windingIndex(orig.V, orig.F, orig.nf, orig.dead);
   const W1 = windingIndex(merged.V, merged.F, merged.nf, merged.dead);
@@ -3218,7 +3219,8 @@ function mergeShells(mesh, comp, opts) {
       }
       return false;
     };
-    const verdict = (f) => {   // 1 keep, 0 drop, -1 no opinion
+    // 1 keep, 0 drop, -1 no opinion; 3 and 2: keep and drop, but weak (see below)
+    const verdict = (f) => {
       if (!(area[f] > 0)) return -1;
       if (duplicateOfFlush(f)) return 0;
       faceNormalInto(V, U.F, f, n);
@@ -3241,7 +3243,12 @@ function mergeShells(mesh, comp, opts) {
       if (ho < 2 * weldTol || hi < 2 * weldTol) return -1;
       const wo = W.at(cx + ho * n[0], cy + ho * n[1], cz + ho * n[2]);
       const wi = W.at(cx - hi * n[0], cy - hi * n[1], cz - hi * n[2]);
-      return wo === 0 && wi >= 1 ? 1 : 0;
+      const v = wo === 0 && wi >= 1 ? 1 : 0;
+      // a surface closer than float noise (a wall touching another part's wall at an angle no snap makes exact, faces
+      // of two parts lying on each other) is stepped over: the answer is the fused one, not the exact one, and where
+      // that changes there is no cut. Such a verdict is weak: see the regions below.
+      if (RC.hit(cx, cy, cz, n[0], n[1], n[2], weldTol, p0) < weldTol || RC.hit(cx, cy, cz, -n[0], -n[1], -n[2], weldTol, p0) < weldTol) return v + 2;
+      return v;
     };
     const keep = new Uint8Array(U.nf);
     // a region can only leak where a cut is open (an odd number of cut pieces meet at a vertex) or a face could not
@@ -3262,14 +3269,17 @@ function mergeShells(mesh, comp, opts) {
       const sorted = faces.length <= 25 ? faces : faces.slice().sort((p, r) => area[r] - area[p]);
       const step = Math.max(1, Math.floor(sorted.length / 12));
       const sample = sorted.length <= 25 ? sorted : sorted.filter((_, i) => i < 13 || i % step === 0).slice(0, 25);
-      let yes = 0, no = 0;
-      for (const f of (opts.perFaceAll ? faces : sample)) { const v = verdict(f); if (v === 1) yes += area[f]; else if (v === 0) no += area[f]; }
+      let yes = 0, no = 0, wyes = 0, wno = 0;
+      for (const f of (opts.perFaceAll ? faces : sample)) { const v = verdict(f); if (v === 1) yes += area[f]; else if (v === 0) no += area[f]; else if (v === 3) wyes += area[f]; else if (v === 2) wno += area[f]; }
+      // a region bounded by closed cuts lies on the union's surface as a whole or not at all: clear views decide (on
+      // synthetic panels touching at angles this also did better for leaky regions than letting weak verdicts vote)
+      if (!yes && !no) { yes = wyes; no = wno; } else if ((wyes && no) || (wno && yes)) stats.weakOverruled = (stats.weakOverruled || 0) + 1;
       if (api._mergeFull && yes && no) (api._mergeFull.mixed || (api._mergeFull.mixed = [])).push({ root, faces, yes, no, leaky: leaky.has(root), verdicts: faces.map((f) => verdict(f)) });
       if (yes && no && (leaky.has(root) || opts.perFaceMixed)) {
         // this region may leak through an open cut: decide face by face, slivers follow their neighbours
         stats.mixedRegions = (stats.mixedRegions || 0) + 1;
         const v = new Map(), queue = [];
-        for (const f of faces) { const x = verdict(f); v.set(f, x); if (x >= 0) queue.push(f); }
+        for (const f of faces) { let x = verdict(f); if (x >= 2) x -= 2; v.set(f, x); if (x >= 0) queue.push(f); }
         for (let qi = 0; qi < queue.length; qi++) {
           const f = queue[qi];
           for (let k2 = 0; k2 < 3; k2++) {
@@ -3354,6 +3364,9 @@ function untangleCrossings(mesh, opts, diag) {
   let cur = weldExact(s0.soup, s0.n); cur.dead = new Uint8Array(Math.max(1, cur.src.length)); cur.ndead = 0;
   let found = cross(cur);
   if (!found.faces.size) return null;
+  // the holes it refills are small and nearly flat: a round that changes the volume noticeably has eaten into the model
+  // (wide rings around many crossings on a small mesh), and it and anything wider are not taken
+  const vol0 = signedVolumeOf(cur), volTol = 2e-3 * Math.abs(vol0);
   let best = null, bestPairs = found.pairs, removed = 0, rounds = 0;
   for (let round = 0; round < 8 && found.pairs; round++) {
     const nf = cur.nf, kill = new Uint8Array(nf);
@@ -3379,6 +3392,7 @@ function untangleCrossings(mesh, opts, diag) {
     M.V = Float64Array.from(snap.V); M.nv = snap.nv; M.F = Uint32Array.from(snap.F); M.nf = snap.nf;
     M.src = new Int32Array(Math.max(1, snap.nf)).fill(-1); M.flags = new Uint8Array(Math.max(1, snap.nf)); M.dead = new Uint8Array(Math.max(1, snap.nf)); M.ndead = 0;
     removed += nf - n;
+    if (!(Math.abs(signedVolumeOf(M) - vol0) <= volTol)) break;
     found = cross(M);
     if (found.pairs < bestPairs) { best = { mesh: M, rounds, removed }; bestPairs = found.pairs; }
     cur = M;

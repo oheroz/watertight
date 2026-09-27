@@ -22,6 +22,23 @@
   exactly with the model, so every surface outside the hollows keeps its
   original triangles. Shallow grooves and engraving stay open. If the union
   comes out unclean, the fill lattice is turned and the fill tried again.
+- Faces cut by many other parts (a plate under lettering, a base under a crowd
+  of parts) are triangulated with a constrained Delaunay triangulation (exact
+  orientation tests) instead of the greedy one, whose cost grew with the cube of
+  the points on the face: merges that ran for more than 10 minutes take seconds.
+- Merging gives up after a time limit (default 2 minutes, shared with filling
+  hollows; "Merge time limit" in the settings, `--merge-time` in the CLI) or past
+  1.5 million crossing triangle pairs, keeps the parts as separate shells and
+  says why.
+- A part that crosses itself (a keychain drawn as one shell) is merged with
+  itself; the volume check no longer takes its signed volume, which counts the
+  overlap twice, as a lower bound.
+- A wall touching another part's wall within float noise, at an angle the flush
+  snap cannot make exact, no longer drags the rest of its region with it: test
+  points that step over such a surface only decide a region when nothing in it
+  has a clear view (before, whole panels could vanish from the union).
+- The float32 untangle step stops before a round that changes the volume: on a
+  small mesh with many crossings its widening rings could eat most of the model.
 - Self-intersections are now part of the final verification.
 - Section view (clip plane on X, Y or Z) in the viewer.
 - Command-line tool `tools/watertight.js`, independent checker

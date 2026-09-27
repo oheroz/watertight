@@ -55,6 +55,10 @@ voids trapped between merged parts are filled. The merged solid is checked
 against the original parts before it is used; if they disagree, the parts are
 kept separate and the report says so. The few crossings that rounding the
 result to float32 can leave in nearly coincident spots are rebuilt locally.
+Merging gives up after a time limit (2 minutes by default, under Repair
+settings; `--merge-time` on the command line) or when the parts cross at more
+than 1.5 million triangle pairs; the parts are then kept as separate shells and
+the report says why.
 
 **Fill interior hollows** (opt-in) rolls a ball of the chosen gap width around
 the outside on a voxel grid; empty space the ball cannot reach, and that

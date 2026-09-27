@@ -279,5 +279,24 @@ function runCases(E, run, check, sum) {
     check('one shell crossing itself', r.before.shells === 1 && r.before.selfIntersections > 0, sum(r.before) + ' pairs=' + r.before.selfIntersections);
     check('self-crossing shell merged with itself', r.after.clean && r.after.shells === 1 && r.after.selfIntersections === 0 && !!r.merge && r.after.stats.volume < Math.abs(r.before.stats.signedVolume), sum(r.after) + ' pairs=' + r.after.selfIntersections + ' vol ' + r.after.stats.volume + ' vs ' + r.before.stats.signedVolume);
   }
+  {
+    // panels whose walls touch within float noise, at an angle no flush snap makes exact, tied together by tilted bars.
+    // A wall's test points step over its neighbour, so walls say "drop" while the panel's top (in the same region) says
+    // "keep": the clear view must win, or whole panels vanish. And the float32 untangle must not eat the model.
+    const s = S.soup(), gap = 1e-5;
+    let seed = 9; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const x0 = i * (10 + gap), y0 = j * (10 + gap); S.box(s, x0, y0, 0, x0 + 10, y0 + 10, 3 + rnd()); }
+    const L = 4 * (10 + gap);
+    for (let b = 0; b < 10; b++) {
+      const t0 = s.t.length, y = 2 + rnd() * (L - 4), z = 1 + rnd() * 2;
+      S.box(s, -2, y - 0.6, z - 0.6, L + 2, y + 0.6, z + 0.6);
+      const a = (rnd() - 0.5) * 1.2, c = Math.cos(a), sn = Math.sin(a);
+      for (let i = t0; i < s.t.length; i += 3) { const x = s.t[i] - L / 2, yy = s.t[i + 1] - L / 2; s.t[i] = L / 2 + c * x - sn * yy; s.t[i + 1] = L / 2 + sn * x + c * yy; }
+    }
+    for (const [ax, ang] of [[2, 0.46], [0, 0.21]]) for (let i = 0; i < s.t.length; i += 3) { const u = (ax + 1) % 3, w = (ax + 2) % 3, x = s.t[i + u], y = s.t[i + w]; s.t[i + u] = Math.cos(ang) * x - Math.sin(ang) * y; s.t[i + w] = Math.sin(ang) * x + Math.cos(ang) * y; }
+    const r = run('panels touching within float noise, tilted', s.done());
+    // (a few float32 crossings stay where the walls touch: the untangle stops before it would eat into the panels)
+    check('touching panels merged into one solid, no panel lost', r.after.printable && r.after.shells === 1 && !!r.merge && r.after.stats.volume > 0.85 * r.before.stats.volume, sum(r.after) + ' pairs=' + r.after.selfIntersections + ' vol ' + r.after.stats.volume.toFixed(1) + ' vs parts ' + r.before.stats.volume.toFixed(1));
+  }
 }
 if (typeof module !== 'undefined') module.exports = runCases;

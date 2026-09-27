@@ -35,24 +35,26 @@ const SHADE = `
   vec3 base = gl_FrontFacing ? uColor : uBack;
   vec3 c = base * (0.28 + 0.72 * d) + vec3(spec);`;
 // GLSL ES 1.00 (WebGL1, derivatives via extension)
-const VS1 = `attribute vec3 aPos; uniform mat4 uMVP; uniform mat4 uMV; varying vec3 vPos;
-void main(){ vec4 p = uMV * vec4(aPos, 1.0); vPos = p.xyz; gl_Position = uMVP * vec4(aPos, 1.0); }`;
+// section view: fragments on the far side of the plane dot(p, uClip.xyz) = uClip.w are cut away (uClipOn > 0.5)
+const CLIP = `if (uClipOn > 0.5 && dot(vW, uClip.xyz) > uClip.w) discard;`;
+const VS1 = `attribute vec3 aPos; uniform mat4 uMVP; uniform mat4 uMV; varying vec3 vPos; varying vec3 vW;
+void main(){ vec4 p = uMV * vec4(aPos, 1.0); vPos = p.xyz; vW = aPos; gl_Position = uMVP * vec4(aPos, 1.0); }`;
 const FS1 = `#extension GL_OES_standard_derivatives : enable
-precision mediump float; varying vec3 vPos; uniform vec3 uColor; uniform vec3 uBack; uniform float uAlpha;
-void main(){ ${SHADE} gl_FragColor = vec4(c, uAlpha); }`;
-const VS1_LINE = `attribute vec3 aPos; uniform mat4 uMVP; void main(){ gl_Position = uMVP * vec4(aPos, 1.0); gl_Position.z -= 0.0008 * gl_Position.w; }`;
-const FS1_LINE = `precision mediump float; uniform vec3 uColor; void main(){ gl_FragColor = vec4(uColor, 1.0); }`;
+precision highp float; varying vec3 vPos; varying vec3 vW; uniform vec3 uColor; uniform vec3 uBack; uniform float uAlpha; uniform vec4 uClip; uniform float uClipOn;
+void main(){ ${CLIP} ${SHADE} gl_FragColor = vec4(c, uAlpha); }`;
+const VS1_LINE = `attribute vec3 aPos; uniform mat4 uMVP; varying vec3 vW; void main(){ vW = aPos; gl_Position = uMVP * vec4(aPos, 1.0); gl_Position.z -= 0.0008 * gl_Position.w; }`;
+const FS1_LINE = `precision highp float; uniform vec3 uColor; varying vec3 vW; uniform vec4 uClip; uniform float uClipOn; void main(){ ${CLIP} gl_FragColor = vec4(uColor, 1.0); }`;
 // GLSL ES 3.00 (WebGL2, derivatives are core)
 const VS2 = `#version 300 es
-in vec3 aPos; uniform mat4 uMVP; uniform mat4 uMV; out vec3 vPos;
-void main(){ vec4 p = uMV * vec4(aPos, 1.0); vPos = p.xyz; gl_Position = uMVP * vec4(aPos, 1.0); }`;
+in vec3 aPos; uniform mat4 uMVP; uniform mat4 uMV; out vec3 vPos; out vec3 vW;
+void main(){ vec4 p = uMV * vec4(aPos, 1.0); vPos = p.xyz; vW = aPos; gl_Position = uMVP * vec4(aPos, 1.0); }`;
 const FS2 = `#version 300 es
-precision mediump float; in vec3 vPos; uniform vec3 uColor; uniform vec3 uBack; uniform float uAlpha; out vec4 fragColor;
-void main(){ ${SHADE} fragColor = vec4(c, uAlpha); }`;
+precision highp float; in vec3 vPos; in vec3 vW; uniform vec3 uColor; uniform vec3 uBack; uniform float uAlpha; uniform vec4 uClip; uniform float uClipOn; out vec4 fragColor;
+void main(){ ${CLIP} ${SHADE} fragColor = vec4(c, uAlpha); }`;
 const VS2_LINE = `#version 300 es
-in vec3 aPos; uniform mat4 uMVP; void main(){ gl_Position = uMVP * vec4(aPos, 1.0); gl_Position.z -= 0.0008 * gl_Position.w; }`;
+in vec3 aPos; uniform mat4 uMVP; out vec3 vW; void main(){ vW = aPos; gl_Position = uMVP * vec4(aPos, 1.0); gl_Position.z -= 0.0008 * gl_Position.w; }`;
 const FS2_LINE = `#version 300 es
-precision mediump float; uniform vec3 uColor; out vec4 fragColor; void main(){ fragColor = vec4(uColor, 1.0); }`;
+precision highp float; uniform vec3 uColor; in vec3 vW; uniform vec4 uClip; uniform float uClipOn; out vec4 fragColor; void main(){ ${CLIP} fragColor = vec4(uColor, 1.0); }`;
 
 function create(canvas, theme) {
   const isGL2 = !!window.WebGL2RenderingContext;
@@ -66,8 +68,8 @@ function create(canvas, theme) {
   const pBody = gl2 ? program(VS2, FS2) : program(VS1, FS1), pLine = gl2 ? program(VS2_LINE, FS2_LINE) : program(VS1_LINE, FS1_LINE);
   if (!gl.getProgramParameter(pBody, gl.LINK_STATUS) || !gl.getProgramParameter(pLine, gl.LINK_STATUS)) { console.error('shader link failed', gl.getProgramInfoLog(pBody), gl.getProgramInfoLog(pLine)); return null; }
   const U = (p, n) => gl.getUniformLocation(p, n);
-  const uB = { mvp: U(pBody, 'uMVP'), mv: U(pBody, 'uMV'), color: U(pBody, 'uColor'), back: U(pBody, 'uBack'), alpha: U(pBody, 'uAlpha'), pos: gl.getAttribLocation(pBody, 'aPos') };
-  const uL = { mvp: U(pLine, 'uMVP'), color: U(pLine, 'uColor'), pos: gl.getAttribLocation(pLine, 'aPos') };
+  const uB = { mvp: U(pBody, 'uMVP'), mv: U(pBody, 'uMV'), color: U(pBody, 'uColor'), back: U(pBody, 'uBack'), alpha: U(pBody, 'uAlpha'), clip: U(pBody, 'uClip'), clipOn: U(pBody, 'uClipOn'), pos: gl.getAttribLocation(pBody, 'aPos') };
+  const uL = { mvp: U(pLine, 'uMVP'), color: U(pLine, 'uColor'), clip: U(pLine, 'uClip'), clipOn: U(pLine, 'uClipOn'), pos: gl.getAttribLocation(pLine, 'aPos') };
 
   const colors = Object.assign({
     body: '#c9d1da', back: '#e2604a', inverted: '#f0a41b', fill: '#3ec46d', naked: '#ff3b2f', nonManifold: '#e23bff', degenerate: '#ffd21f', selfx: '#22c7e6', wire: '#3a4250', clear: [0, 0, 0, 0],
@@ -77,6 +79,7 @@ function create(canvas, theme) {
     V: null, nv: 0, nf: 0, bbox: null,
     vbo: null, ibo: null, subsets: {}, lines: {}, wireBuf: null, wireCount: 0,
     show: { problems: true, fills: true, wire: false },
+    section: { axis: -1, t: 0.5 },
     cam: { yaw: 0.6, pitch: 0.5, dist: 10, target: [0, 0, 0], radius: 1 },
     dirty: true, alive: true,
   };
@@ -167,11 +170,16 @@ function create(canvas, theme) {
     const near = Math.max(cam.dist - cam.radius * 3, cam.radius * 0.01), far = cam.dist + cam.radius * 3;
     const proj = perspective(40 * Math.PI / 180, canvas.width / canvas.height, near, far);
     const mvp = mul(proj, view);
+    // section plane: keep the part of the model below t along the chosen axis
+    const sec = state.section, on = sec.axis >= 0 && state.bbox ? 1 : 0;
+    const cn = [0, 0, 0]; let cw = 0;
+    if (on) { cn[sec.axis] = 1; cw = state.bbox.min[sec.axis] + sec.t * (state.bbox.max[sec.axis] - state.bbox.min[sec.axis]); }
+    const setClip = (u) => { gl.uniform4f(u.clip, cn[0], cn[1], cn[2], cw); gl.uniform1f(u.clipOn, on); };
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE);
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     // body
     gl.useProgram(pBody);
-    gl.uniformMatrix4fv(uB.mvp, false, mvp); gl.uniformMatrix4fv(uB.mv, false, view);
+    gl.uniformMatrix4fv(uB.mvp, false, mvp); gl.uniformMatrix4fv(uB.mv, false, view); setClip(uB);
     gl.bindBuffer(gl.ARRAY_BUFFER, state.vbo); gl.enableVertexAttribArray(uB.pos); gl.vertexAttribPointer(uB.pos, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, state.ibo);
     const body = hexToRgb(colors.body), back = hexToRgb(colors.back);
@@ -185,7 +193,7 @@ function create(canvas, theme) {
     if (state.show.problems) { drawSub('selfx'); drawSub('inverted'); drawSub('degenerate'); drawSub('duplicate'); }
     gl.disable(gl.POLYGON_OFFSET_FILL);
     // lines
-    gl.useProgram(pLine); gl.uniformMatrix4fv(uL.mvp, false, mvp);
+    gl.useProgram(pLine); gl.uniformMatrix4fv(uL.mvp, false, mvp); setClip(uL);
     if (state.show.wire) {
       buildWire();
       if (state.wireBuf) { const c = hexToRgb(colors.wire); gl.uniform3f(uL.color, c[0], c[1], c[2]); gl.bindBuffer(gl.ARRAY_BUFFER, state.wireBuf); gl.enableVertexAttribArray(uL.pos); gl.vertexAttribPointer(uL.pos, 3, gl.FLOAT, false, 0, 0); gl.drawArrays(gl.LINES, 0, state.wireCount); }
@@ -237,6 +245,7 @@ function create(canvas, theme) {
   return {
     setMesh, fit, gl2,
     setShow(k, v) { state.show[k] = v; state.dirty = true; },
+    setSection(axis, t) { state.section.axis = axis; if (t !== undefined) state.section.t = t; state.dirty = true; },
     getShow() { return Object.assign({}, state.show); },
     setColors(c) { Object.assign(colors, c); state.dirty = true; },
     redraw() { state.dirty = true; },

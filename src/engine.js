@@ -464,31 +464,45 @@ function componentOrientation(mesh, opp, comp, ncomp, flip, storedNormals, quick
   const nf = mesh.nf, F = mesh.F, V = mesh.V, dead = mesh.dead, src = mesh.src;
   const closed = new Uint8Array(ncomp).fill(1);
   const vol = new Float64Array(ncomp), vote = new Float64Array(ncomp), area = new Float64Array(ncomp);
+  const faceArea = new Float64Array(nf), flags = mesh.flags;
   const n = [0, 0, 0];
   for (let f = 0; f < nf; f++) {
     if (dead[f]) continue; const c = comp[f]; if (c < 0) continue;
     const sgn = flip[f] ? -1 : 1;
     for (let k = 0; k < 3; k++) if (opp[f * 3 + k] < 0) { closed[c] = 0; break; }
     vol[c] += sgn * det3(V, F[f * 3], F[f * 3 + 1], F[f * 3 + 2]);
-    area[c] += faceNormalInto(V, F, f, n);
+    faceArea[f] = faceNormalInto(V, F, f, n);
+    area[c] += faceArea[f];
     if (storedNormals && src[f] >= 0) {
       const s = src[f] * 3;
       vote[c] += sgn * (n[0] * storedNormals[s] + n[1] * storedNormals[s + 1] + n[2] * storedNormals[s + 2]);
     }
   }
   const depth = quick ? new Int32Array(ncomp) : nestingDepths(mesh, comp, ncomp, closed);
+  // what the input meant: when this shell faces outward, how much of its original area keeps its original winding?
+  // A shell drawn outward is a part (even when it sits inside another one); only a shell drawn inward is a cavity.
+  const agree = new Float64Array(ncomp), counted = new Float64Array(ncomp);
+  for (let f = 0; f < nf; f++) {
+    if (dead[f]) continue; const c = comp[f]; if (c < 0 || (flags && (flags[f] & FLAG_FILL))) continue;
+    const inputFlipped = flags ? (flags[f] & FLAG_FLIPPED ? 1 : 0) : 0;
+    const outwardFlip = (flip[f] ? 1 : 0) ^ (vol[c] < 0 ? 1 : 0);
+    counted[c] += faceArea[f];
+    if ((inputFlipped ^ outwardFlip) === 0) agree[c] += faceArea[f];
+  }
+  const drawnOutward = new Uint8Array(ncomp);
+  for (let c = 0; c < ncomp; c++) drawnOutward[c] = counted[c] > 0 ? (agree[c] >= 0.5 * counted[c] ? 1 : 0) : 1;
   const compFlip = new Uint8Array(ncomp);
   for (let c = 0; c < ncomp; c++) {
     if (closed[c]) {
       if (Math.abs(vol[c]) < 1e-300) continue;
-      const want = (depth[c] & 1) ? -1 : 1;
+      const want = ((depth[c] & 1) && !drawnOutward[c]) ? -1 : 1;
       if ((vol[c] < 0 ? -1 : 1) !== want) compFlip[c] = 1;
     } else {
       if (Math.abs(vote[c]) > 1e-9) compFlip[c] = vote[c] < 0 ? 1 : 0;
       else compFlip[c] = vol[c] < 0 ? 1 : 0;
     }
   }
-  return { compFlip, closed, vol, depth, area };
+  return { compFlip, closed, vol, depth, area, drawnOutward };
 }
 
 function applyFlips(mesh, flip, compFlip, comp) {
@@ -1187,7 +1201,9 @@ function analyze(mesh, topo, ctx) {
   }
   res.planarHoles = planar; res.nonPlanarHoles = nonPlanar; res.holes = holes; res.brokenLoops = broken;
   // degenerate & duplicate
-  const dg = classifyDegenerate(mesh, tol);
+  // reported as degenerate: thinner than one float32 step of the model (its shape does not survive in the file);
+  // the cleanup passes use the stricter ctx.tol
+  const dg = classifyDegenerate(mesh, ctx.reportTol || tol);
   const degList = []; for (let i = 0; i < dg.needles.length; i += 3) degList.push(dg.needles[i]); for (let i = 0; i < dg.caps.length; i += 2) degList.push(dg.caps[i]);
   res.degenerateFaces = degList.length; res.degenerateFaceList = Uint32Array.from(degList);
   const dup = findDuplicates(mesh);
@@ -1227,7 +1243,7 @@ function analyze(mesh, topo, ctx) {
   let genus = null;
   if (watertight && res.degenerateFaces === 0) { const chi = nvUsed - topo.ne + alive; genus = comps.count - chi / 2; }
   res.stats = { vertices: nvUsed, triangles: alive, edges: topo.ne, bbox: bb, area, volume: absVol, signedVolume: vol6 / 6, watertight, manifold: res.nonManifoldEdges === 0 && conflicts === 0, closedShells, genus };
-  if (!ctx.quick && ctx.selfIntersections !== false && alive <= (ctx.siMaxFaces || 3000000)) {
+  if ((!ctx.quick || ctx.finalCheck) && ctx.selfIntersections !== false && alive <= (ctx.siMaxFaces || 3000000)) {
     const si = findSelfIntersections(mesh, 200000);
     res.selfIntersections = si.pairs; res.selfIntersectingFaces = si.faces; res.selfIntersectionsTruncated = !!si.truncated;
   } else { res.selfIntersections = null; res.selfIntersectingFaces = new Uint32Array(0); }
@@ -1246,15 +1262,20 @@ const DEFAULTS = {
   smallShellFraction: 0.001, // of largest shell volume
   smallShellMaxFaces: 0,     // 0 = ignore face count criterion
   maxIterations: 12,
-  cavities: true,           // enclosed closed shells are oriented inward (even-odd rule); false = every shell outward
+  cavities: true,           // an enclosed shell drawn inward stays a cavity; false = every shell faces outward
+  mergeParts: true,         // exact union of overlapping parts into one solid (hidden geometry removed)
+  removeInternalParts: true, // parts sealed inside other parts, and voids trapped between merged parts, are removed
   checkSelfIntersections: true,
   selfIntersectionMaxFaces: 3000000,
+  fillHollows: 0,           // > 0: fill hollows reachable only through openings narrower than this fraction of the model size
   solidify: false,          // rebuild the result as one voxel-classified solid (removes self-intersections, unions shells)
   solidifyResolution: 200,  // voxels along the longest axis
 };
 
 function repair(parsed, options, progress) {
   const opts = Object.assign({}, DEFAULTS, options || {});
+  // filling hollows makes the model solid inside: enclosed voids are filled too, and everything is merged
+  if (opts.fillHollows > 0) { opts.cavities = false; opts.mergeParts = true; opts.removeInternalParts = true; opts.solidInside = true; }
   const log = [];
   const t0 = now();
   const say = (s, cls) => log.push({ t: s, c: cls || '' });
@@ -1269,7 +1290,7 @@ function repair(parsed, options, progress) {
   let maxAbs = 0; for (let i = 0; i < mesh.nv * 3; i++) { const a = Math.abs(mesh.V[i]); if (a > maxAbs) maxAbs = a; }
   const degTol = Math.max(4e-7 * Math.max(maxAbs, diag), 1e-12);
   const tol = Math.max(opts.tolerance * diag, 0);
-  const ctx = { tol: degTol, storedNormals: parsed.normals || null, diag, selfIntersections: opts.checkSelfIntersections, siMaxFaces: opts.selfIntersectionMaxFaces };
+  const ctx = { tol: degTol, reportTol: Math.max(Math.pow(2, Math.ceil(Math.log2(maxAbs || 1)) - 23), 1e-12), storedNormals: parsed.normals || null, diag, selfIntersections: opts.checkSelfIntersections, siMaxFaces: opts.selfIntersectionMaxFaces };
   prog('Analyzing', 0.08);
   let topo = buildTopology(mesh);
   const before = analyze(mesh, topo, ctx);
@@ -1282,7 +1303,7 @@ function repair(parsed, options, progress) {
   let cur = before;
   const signature = () => Object.values(totals).join('|') + '|' + mesh.alive() + '|' + mesh.nv;
   const score = (a) => a.nakedEdges + 2 * a.nonManifoldEdges + a.duplicateFaces + a.orientationConflicts + (a.degenerateFaces ? 1 : 0);
-  const totals = { welded: 0, needles: 0, caps: 0, collinearLoops: 0, folds: 0, sliverFlips: 0, sliverCollapses: 0, duplicates: 0, cancelled: 0, fins: 0, splitVerts: 0, flipped: 0, tjunctions: 0, holes: 0, islands: 0, skippedHoles: 0, brokenLoops: 0, zeroShells: 0, smallShells: 0, removedShellFaces: 0 };
+  const totals = { separated: 0, welded: 0, needles: 0, caps: 0, collinearLoops: 0, folds: 0, sliverFlips: 0, sliverCollapses: 0, duplicates: 0, cancelled: 0, fins: 0, splitVerts: 0, flipped: 0, tjunctions: 0, holes: 0, islands: 0, skippedHoles: 0, brokenLoops: 0, zeroShells: 0, smallShells: 0, removedShellFaces: 0, cavities: 0, internalParts: 0 };
   while (iter < opts.maxIterations) {
     iter++;
     if (cur.clean || (cur.printable && iter > 1)) break;
@@ -1401,8 +1422,10 @@ function repair(parsed, options, progress) {
     const flip0 = new Uint8Array(mesh.nf);
     const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, flip0, null);
     let maxVol = 0; for (let c = 0; c < comps.count; c++) if (co.closed[c]) maxVol = Math.max(maxVol, Math.abs(co.vol[c]) / 6);
+    let biggest = -1; for (let c = 0; c < comps.count; c++) if (biggest < 0 || co.area[c] > co.area[biggest]) biggest = c;
     const kill = new Uint8Array(comps.count); let zero = 0, small = 0;
     for (let c = 0; c < comps.count; c++) {
+      if (c === biggest) continue;
       const vol = Math.abs(co.vol[c]) / 6;
       // a double-sided sheet has (almost) no volume for its surface area; a real thin part still has some
       const zeroVol = vol < 1e-4 * Math.pow(co.area[c], 1.5);
@@ -1428,11 +1451,134 @@ function repair(parsed, options, progress) {
     if (opts.trace) { const fd = new Int32Array(mesh.nf), ff = new Int8Array(mesh.nf), fv = new Float64Array(mesh.nf); for (let f = 0; f < mesh.nf; f++) { const c = comps.comp[f]; if (c >= 0) { fd[f] = co.depth[c]; ff[f] = co.compFlip[c] * 2 + flip[f]; fv[f] = co.vol[c] / 6; } } api._orientFaceDepth = fd; api._orientFaceFlip = ff; api._orientFaceVol = fv; api._orientNf = mesh.nf; }
     const n = applyFlips(mesh, flip, co.compFlip, comps.comp);
     if (n) { totals.flipped += n; rebuild(); }
-    let cav = 0; for (let c = 0; c < comps.count; c++) if (co.closed[c] && (co.depth[c] & 1)) cav++;
-    if (cav) say(`${cav} inner shell${cav > 1 ? 's' : ''} kept as cavit${cav > 1 ? 'ies' : 'y'} (normals pointing inward)`);
+    for (let c = 0; c < comps.count; c++) if (co.closed[c] && (co.depth[c] & 1) && !co.drawnOutward[c] && opts.cavities) totals.cavities++;
+  }
+  // 10. parts sealed inside other parts print as nothing (or as a void in even-odd slicers): remove them
+  if (opts.removeInternalParts && !opts.mergeParts) {
+    const h = hiddenShells(mesh, topo, null);
+    if (h.parts) { for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f] && h.comps.comp[f] >= 0 && h.remove[h.comps.comp[f]]) mesh.killFace(f); totals.internalParts += h.parts; rebuild(); }
   }
   mesh.removeUnusedVertices();
   rebuild();
+  // 11a. fill interior hollows (opt-in): space the outside reaches only through openings narrower than the given width
+  //      becomes solid. The filling goes in as one more part and a single exact union absorbs it together with every
+  //      overlapping part; whatever ends up sealed inside is removed with the voids. Where the filling happens to
+  //      slice through faces of the model that coincide, the union can come out unclean: the lattice is then turned
+  //      differently and the fill tried again.
+  let hollowInfo = null, fillMerge = null;
+  if (opts.fillHollows > 0 && mesh.alive() > 0) {
+    prog('Filling interior hollows', 0.845);
+    const bbm = bbox(mesh.V, mesh.nv), maxDim = Math.max(bbm.size[0], bbm.size[1], bbm.size[2]) || 1;
+    const radius = opts.fillHollows * bbm.diag / 2;
+    // at most about 16 million voxels (some 430 MB of working memory, fine for a browser tab)
+    const vb = (bbm.size[0] + 4 * radius) * (bbm.size[1] + 4 * radius) * (bbm.size[2] + 4 * radius) * 1.3;
+    const voxel = Math.max(maxDim / 500, radius / 3, Math.cbrt(vb / 16e6));
+    let alive = 0; for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f]) alive++;
+    let best = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const fillPart = hollowFill(mesh, radius, voxel, attempt);
+      if (!fillPart) break;
+      const soup = new Float32Array((alive + fillPart.count) * 9); let o = 0;
+      for (let f = 0; f < mesh.nf; f++) {
+        if (mesh.dead[f]) continue;
+        for (let c = 0; c < 3; c++) { const v = mesh.F[f * 3 + c] * 3; soup[o * 9 + c * 3] = mesh.V[v]; soup[o * 9 + c * 3 + 1] = mesh.V[v + 1]; soup[o * 9 + c * 3 + 2] = mesh.V[v + 2]; }
+        o++;
+      }
+      soup.set(fillPart.soup, alive * 9);
+      const fw = weldExact(fillPart.soup.slice(), fillPart.count), fillShells = faceComponents(fw, buildTopology(fw).opp).count;
+      const inner = repair({ tris: soup, normals: null, count: alive + fillPart.count, format: 'filled', header: '' }, Object.assign({}, opts, { fillHollows: 0, solidInside: true, solidify: false, trace: null, checkSelfIntersections: true }), null);
+      const a = inner.after, clean = a.printable && a.selfIntersections === 0 && !a.degenerateFaces && !!inner.merge;
+      if (opts.trace) opts.trace.push(`fill attempt ${attempt + 1}: ${clean ? 'clean' : 'not clean'} (shells ${a.shells}, crossings ${a.selfIntersections}, degenerate ${a.degenerateFaces}, merged ${!!inner.merge})`);
+      const score = (a.printable ? 0 : 1e9) + (inner.merge ? 0 : 1e8) + (a.selfIntersections || 0) * 1000 + a.degenerateFaces * 10 + a.shells;
+      if (!best || score < best.score) best = { inner, fillPart, fillShells, score, clean };
+      if (clean) break;
+    }
+    if (best && best.inner.merge) {
+      const snap = best.inner.repaired;
+      mesh = new Mesh(Math.max(4, snap.nv), Math.max(4, snap.nf));
+      mesh.V = Float64Array.from(snap.V); mesh.nv = snap.nv; mesh.F = Uint32Array.from(snap.F); mesh.nf = snap.nf;
+      mesh.src = new Int32Array(Math.max(1, snap.nf)).fill(-1); mesh.flags = new Uint8Array(Math.max(1, snap.nf)); mesh.dead = new Uint8Array(Math.max(1, snap.nf)); mesh.ndead = 0;
+      rebuild();
+      fillMerge = best.inner;
+      hollowInfo = { hollows: best.fillPart.hollows, volume: best.fillPart.volume, width: 2 * radius, parts: best.fillShells };
+      if (!best.clean) say('The filled model still has crossing triangles in a few spots (the filling met faces of the model that coincide)', 'warn');
+    } else if (best) say('Could not fill the interior hollows cleanly; the model is repaired without filling', 'warn');
+  }
+  // 11. merge overlapping parts into one solid (exact union). Output coordinates are rounded to float32, which can
+  //     leave a few new micro-overlaps in near-degenerate spots; a second exact pass resolves those.
+  let mergeInfo = null;
+  if (opts.mergeParts && mesh.alive() > 0 && !fillMerge) {
+    prog('Merging overlapping parts', 0.85);
+    const comps0 = faceComponents(mesh, topo.opp);
+    const co0 = componentOrientation(mesh, topo.opp, comps0.comp, comps0.count, new Uint8Array(mesh.nf), null, true);
+    // the union lies inside the outer shells, and holds at least the biggest part less every cavity
+    let sumVol = 0, maxVol = 0, cavVol = 0; for (let c = 0; c < comps0.count; c++) { const v = co0.vol[c] / 6; if (v > 0) sumVol += v; else cavVol -= v; if (v > maxVol) maxVol = v; }
+    const cavityPart = new Uint8Array(comps0.count); for (let c = 0; c < comps0.count; c++) cavityPart[c] = co0.vol[c] < 0 ? 1 : 0;
+    const mesh0 = { V: Float64Array.from(mesh.V.subarray(0, mesh.nv * 3)), F: Uint32Array.from(mesh.F.subarray(0, mesh.nf * 3)), nf: mesh.nf, nv: mesh.nv, dead: new Uint8Array(mesh.nf), comp: comps0.comp };
+    let cur = mesh; cur.src = Int32Array.from(comps0.comp.subarray(0, mesh.nf)); // src now holds the input part of every face
+    let accepted = null, firstStats = null, passes = 0, lastLog = null, failNote = '', microCollapsed = 0, best = null;
+    for (let pass = 0; pass < (opts.mergePasses || 3); pass++) {
+      cur.compact();
+      const topoC = buildTopology(cur), cc = faceComponents(cur, topoC.opp);
+      const mr = mergeShells(cur, cc.comp, opts);
+      if (!mr.changed || !mr.mesh.nf) break;
+      if (!firstStats) firstStats = mr.stats;
+      const R = mr.mesh, partOut = new Int32Array(R.nf);
+      for (let f = 0; f < R.nf; f++) partOut[f] = cur.src[mr.parentOf[f]];
+      const soup = new Float32Array(R.nf * 9);
+      for (let f = 0; f < R.nf; f++) for (let c = 0; c < 3; c++) { const v = R.F[f * 3 + c] * 3; soup[f * 9 + c * 3] = R.V[v]; soup[f * 9 + c * 3 + 1] = R.V[v + 1]; soup[f * 9 + c * 3 + 2] = R.V[v + 2]; }
+      // voids between the merged parts keep their inward orientation here (they are judged right after)
+      const inner = repair({ tris: soup, normals: null, count: R.nf, format: 'merged', header: '' }, Object.assign({}, opts, { fillHollows: 0, cavities: true, mergeParts: false, removeInternalParts: false, solidify: false, trace: null, checkSelfIntersections: false }), null);
+      const snap = inner.repaired;
+      const M = new Mesh(Math.max(4, snap.nv), Math.max(4, snap.nf));
+      M.V = Float64Array.from(snap.V); M.nv = snap.nv; M.F = Uint32Array.from(snap.F); M.nf = snap.nf;
+      M.src = new Int32Array(Math.max(1, snap.nf)); for (let f = 0; f < snap.nf; f++) M.src[f] = snap.src[f] >= 0 && snap.src[f] < partOut.length ? partOut[snap.src[f]] : -1;
+      M.flags = new Uint8Array(Math.max(1, snap.nf)); M.dead = new Uint8Array(Math.max(1, snap.nf)); M.ndead = 0;
+      // sanity: the union can be no bigger than all parts together and no smaller than the biggest part
+      const uv = inner.after.stats.signedVolume;
+      const volOk = uv <= sumVol * (1 + 1e-6) + 1e-9 && uv >= (maxVol - cavVol) * (1 - 1e-3) - 1e-9;
+      if (!inner.after.printable || !volOk) { failNote = inner.after.printable ? `volume check failed (${uv.toPrecision(6)} vs parts ${sumVol.toPrecision(6)}, biggest ${maxVol.toPrecision(6)}, cavities ${cavVol.toPrecision(4)})` : 'merged surface not watertight'; if (opts.trace) opts.trace.push(`merge pass ${pass + 1} rejected: ${failNote} (naked ${inner.after.nakedEdges}, nm ${inner.after.nonManifoldEdges}, inverted ${inner.after.invertedNormals}, dup ${inner.after.duplicateFaces}, conflicts ${inner.after.orientationConflicts})`); break; }
+      // and the merged solid must agree with the original about what is solid next to every part's surface
+      const agree = unionAgrees(mesh0, M, diag);
+      if (!agree.ok) { failNote = `merged solid disagrees with the parts at ${agree.bad} of ${agree.total} test points`; if (opts.trace) opts.trace.push(`merge pass ${pass + 1} rejected: ${failNote}`); break; }
+      accepted = M; passes++; lastLog = inner.log;
+      // microscopic edges the boolean leaves at near-degenerate spots turn into crossings once rounded to float32
+      const micro = collapseMicroEdges(M, 1e-5 * diag);
+      if (micro) { microCollapsed += micro; M.removeUnusedVertices(); }
+      const left = findSelfIntersections(M, 1).pairs;
+      if (opts.trace) opts.trace.push(`merge pass ${pass + 1}: ${mr.stats.intersectingPairs} cuts, ${left} crossings left, ${M.nf} faces`);
+      if (!best || left < best.left) best = { M, left, log: inner.log };
+      if (!left) break;
+      cur = M;
+    }
+    if (best) { accepted = best.M; lastLog = best.log; }   // a later pass can round into more crossings than it fixed
+    if (accepted) {
+      const M = accepted;
+      let topoM = buildTopology(M);
+      const shellOf = (f) => M.src[f];
+      let voids = 0, parts = 0;
+      if (opts.removeInternalParts) {
+        for (let round = 0; round < 3; round++) {
+          const h = hiddenShells(M, topoM, shellOf, opts.solidInside ? () => false : (part) => cavityPart[part] === 1);
+          if (!h.parts && !h.voids) break;
+          for (let f = 0; f < M.nf; f++) if (!M.dead[f] && h.comps.comp[f] >= 0 && h.remove[h.comps.comp[f]]) M.killFace(f);
+          voids += h.voids; parts += h.parts; M.compact(); topoM = buildTopology(M);
+        }
+        M.removeUnusedVertices();
+      }
+      M.src.fill(-1);
+      mesh = M; rebuild();
+      mergeInfo = { parts: comps0.count, stats: firstStats, passes, microCollapsed, voids, internal: parts, volumeBefore: sumVol - cavVol, volumeAfter: signedVolumeOf(mesh), innerLog: lastLog };
+    } else if (failNote) {
+      mesh.src.fill(-1);
+      say(`Could not merge the overlapping parts cleanly (${failNote}); they are kept as separate shells`, 'warn');
+    } else mesh.src.fill(-1);
+    // parts sealed inside other parts still print as nothing when the parts stay separate
+    if (!accepted && opts.removeInternalParts) {
+      const h = hiddenShells(mesh, topo, null);
+      if (h.parts) { for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f] && h.comps.comp[f] >= 0 && h.remove[h.comps.comp[f]]) mesh.killFace(f); totals.internalParts += h.parts; mesh.removeUnusedVertices(); rebuild(); }
+    }
+  }
   let solidInfo = null;
   if (opts.solidify && mesh.alive() > 0) {
     prog('Rebuilding as solid', 0.86);
@@ -1440,7 +1586,7 @@ function repair(parsed, options, progress) {
     if (sol.mesh.nf > 0) {
       const soup = new Float32Array(sol.mesh.nf * 9);
       for (let f = 0; f < sol.mesh.nf; f++) for (let c = 0; c < 3; c++) { const v = sol.mesh.F[f * 3 + c] * 3; soup[f * 9 + c * 3] = sol.mesh.V[v]; soup[f * 9 + c * 3 + 1] = sol.mesh.V[v + 1]; soup[f * 9 + c * 3 + 2] = sol.mesh.V[v + 2]; }
-      const inner = repair({ tris: soup, normals: null, count: sol.mesh.nf, format: 'solid', header: '' }, Object.assign({}, opts, { solidify: false, trace: null, checkSelfIntersections: false }), null);
+      const inner = repair({ tris: soup, normals: null, count: sol.mesh.nf, format: 'solid', header: '' }, Object.assign({}, opts, { fillHollows: 0, solidify: false, trace: null, checkSelfIntersections: false }), null);
       const snap = inner.repaired;
       mesh = new Mesh(Math.max(4, snap.nv), Math.max(4, snap.nf));
       mesh.V = Float64Array.from(snap.V); mesh.nv = snap.nv; mesh.F = Uint32Array.from(snap.F); mesh.nf = snap.nf;
@@ -1449,8 +1595,57 @@ function repair(parsed, options, progress) {
       solidInfo = { resolution: sol.resolution, voxel: sol.voxel, triangles: snap.nf, innerLog: inner.log };
     }
   }
+  // 12. an STL file only stores positions: vertices the repair kept apart (solids touching along an edge or at a
+  //     point) must also be apart after rounding to float32, or a reader would weld them back together
+  if (mesh.alive() > 0 && (mergeInfo || solidInfo || hollowInfo) && opts.finalSliverPass !== false) {
+    // the merged or rebuilt surface gets the same final sliver pass as the main loop
+    const r = removeSlivers(mesh, degTol, diag, 12);
+    if (r.flips || r.collapses) { totals.sliverFlips += r.flips; totals.sliverCollapses += r.collapses; mesh.removeUnusedVertices(); rebuild(); }
+  }
+  if (mesh.alive() > 0 && opts.separateCoincident !== false) { const moved = separateCoincidentVertices(mesh, maxAbs, diag); if (moved) { totals.separated = moved; rebuild(); } }
+  // 13. a merged or rebuilt solid must not cross itself; crossings that rounding to float32 leaves in thin, nearly
+  //     coincident spots are rebuilt locally
+  let untangled = null;
+  if (mesh.alive() > 0 && (mergeInfo || solidInfo || hollowInfo) && opts.untangle !== false) {
+    const un = untangleCrossings(mesh, opts, diag);
+    if (un) { mesh = un.mesh; rebuild(); untangled = un; }
+  }
+  // 14. crumbs the later passes can leave behind: closed shells with next to no volume for their area, or dust far
+  //     too small to print (its volume is so close to zero that rounding to float32 can even turn it inside out)
+  if (mesh.alive() > 0 && opts.removeZeroVolumeShells) {
+    const comps = faceComponents(mesh, topo.opp);
+    if (comps.count > 1) {
+      const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, new Uint8Array(mesh.nf), null, true);
+      let biggest = 0, maxVol = 0; for (let c = 0; c < comps.count; c++) { if (co.area[c] > co.area[biggest]) biggest = c; if (co.closed[c]) maxVol = Math.max(maxVol, Math.abs(co.vol[c]) / 6); }
+      const kill = new Uint8Array(comps.count); let zero = 0;
+      for (let c = 0; c < comps.count; c++) {
+        if (c === biggest || !co.closed[c]) continue;
+        const v = Math.abs(co.vol[c]) / 6;
+        if (v < 1e-4 * Math.pow(co.area[c], 1.5) || v < 1e-8 * maxVol) { kill[c] = 1; zero++; }
+      }
+      if (zero) {
+        for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f] && comps.comp[f] >= 0 && kill[comps.comp[f]]) { mesh.killFace(f); totals.removedShellFaces++; }
+        totals.zeroShells += zero; mesh.removeUnusedVertices(); rebuild();
+      }
+    }
+  }
+  // 15. the final check judges every closed shell as it is written, by its nesting: make the orientation agree (a shell
+  //     an earlier pass kept as a cavity can end up outside every other shell once parts are merged or removed)
+  if (mesh.alive() > 0) {
+    const comps = faceComponents(mesh, topo.opp), flip0 = new Uint8Array(mesh.nf);
+    const co = componentOrientation({ nf: mesh.nf, F: mesh.F, V: mesh.V, dead: mesh.dead, src: mesh.src, flags: null }, topo.opp, comps.comp, comps.count, flip0, null, !opts.cavities);
+    const n = applyFlips(mesh, flip0, co.compFlip, comps.comp);
+    if (n) { totals.flipped += n; rebuild(); }
+  }
   prog('Final check', 0.95);
-  const after = analyze(mesh, topo, Object.assign({ quick: !opts.cavities }, ctx));
+  // the verification runs on exactly what the file will contain: float32 positions, welded by value
+  let after;
+  {
+    const nf = mesh.nf, soup = new Float32Array(nf * 9);
+    for (let f = 0; f < nf; f++) for (let c = 0; c < 3; c++) { const v = mesh.F[f * 3 + c] * 3; soup[f * 9 + c * 3] = mesh.V[v]; soup[f * 9 + c * 3 + 1] = mesh.V[v + 1]; soup[f * 9 + c * 3 + 2] = mesh.V[v + 2]; }
+    const fileMesh = weldExact(soup, nf);
+    after = analyze(fileMesh, buildTopology(fileMesh), Object.assign({ quick: !opts.cavities }, ctx, { storedNormals: null, finalCheck: true }));
+  }
   const snapAfter = mesh.snapshot();
   // narrative log
   if (totals.needles) say(`Collapsed ${fmtInt(totals.needles)} needle-thin degenerate face${totals.needles === 1 ? '' : 's'}`);
@@ -1467,7 +1662,21 @@ function repair(parsed, options, progress) {
   if (totals.folds) say(`Cut ${fmtInt(totals.folds)} face${totals.folds === 1 ? '' : 's'} at non-orientable folds and refilled`);
   if (after.degenerateFaces && after.stats.watertight) say(`${fmtInt(after.degenerateFaces)} hairline sliver face${after.degenerateFaces === 1 ? '' : 's'} left in place (thinner than float precision, topology is intact)`, 'warn');
   if (totals.zeroShells) say(`Removed ${totals.zeroShells} zero-volume shell${totals.zeroShells === 1 ? '' : 's'}`);
+  if (totals.separated) say(`Moved ${fmtInt(totals.separated)} vert${totals.separated === 1 ? 'ex' : 'ices'} where solids touch along an edge or a point by ${fmtTol(Math.max(1e-6 * diag, 8 * Math.pow(2, Math.ceil(Math.log2(maxAbs || 1)) - 23)))} so the file stays manifold`);
   if (totals.smallShells) say(`Removed ${totals.smallShells} small floating shell${totals.smallShells === 1 ? '' : 's'} (${fmtInt(totals.removedShellFaces)} faces)`);
+  if (totals.cavities) say(`${totals.cavities} inner shell${totals.cavities > 1 ? 's' : ''} kept as cavit${totals.cavities > 1 ? 'ies' : 'y'} (drawn facing inward)`);
+  if (totals.internalParts) say(`Removed ${totals.internalParts} part${totals.internalParts > 1 ? 's' : ''} sealed inside other parts`);
+  if (mergeInfo) {
+    const st = mergeInfo.stats;
+    const np = mergeInfo.parts - (hollowInfo ? hollowInfo.parts : 0);
+    say(`Merged ${fmtInt(np)} overlapping part${np === 1 ? '' : 's'}${hollowInfo ? ' and the filling' : ''} into ${after.shells === 1 ? 'one solid' : fmtInt(after.shells) + ' solids'}: cut ${fmtInt(st.intersectingPairs)} crossing triangle pairs, dropped ${fmtInt(st.droppedFaces)} hidden faces`);
+    if (mergeInfo.internal) say(`Removed ${mergeInfo.internal} part${mergeInfo.internal > 1 ? 's' : ''} sealed inside the merged solid`);
+    if (mergeInfo.voids) say(`Filled ${mergeInfo.voids} void${mergeInfo.voids > 1 ? 's' : ''} trapped between merged parts`);
+    if (st.failedFaces) say(`${fmtInt(st.failedFaces)} crossing triangle${st.failedFaces === 1 ? '' : 's'} could not be cut exactly and were re-stitched`, 'warn');
+    if (untangled) say(`Rebuilt ${fmtInt(untangled.removed)} faces around crossings left by rounding to float32 (${untangled.rounds} round${untangled.rounds === 1 ? '' : 's'})`);
+  }
+  if (fillMerge) for (const l of fillMerge.log) if (/^(Merged|Removed \d+ parts? sealed|Filled \d+ voids?|Rebuilt)/.test(l.t)) say(l.t.replace(/^Merged (\S+) overlapping parts?/, (m, n) => { const k = parseInt(n.replace(/,/g, ''), 10) - hollowInfo.parts; return `Merged ${fmtInt(k)} overlapping part${k === 1 ? '' : 's'} and the filling`; }), l.c);
+  if (hollowInfo) say(`Filled ${hollowInfo.hollows} interior hollow${hollowInfo.hollows === 1 ? '' : 's'} (about ${hollowInfo.volume.toPrecision(3)} volume) that open${hollowInfo.hollows === 1 ? 's' : ''} only through gaps narrower than ${fmtTol(hollowInfo.width)}`);
   if (solidInfo) {
     say(`Rebuilt as one solid at ${solidInfo.resolution} voxels (${fmtTol(solidInfo.voxel)} units per voxel): ${fmtInt(after.stats.triangles)} triangles, ${after.shells} shell${after.shells === 1 ? '' : 's'}`);
     for (const l of solidInfo.innerLog) if (!/^Welded|^Flipped/.test(l.t)) say('    ' + l.t, l.c);
@@ -1476,12 +1685,137 @@ function repair(parsed, options, progress) {
   prog('Done', 1);
   return {
     before, after, log, totals, iterations: iter, ms, diag, tolerance: tol, solid: solidInfo ? { resolution: solidInfo.resolution, voxel: solidInfo.voxel } : null,
+    merge: mergeInfo ? { parts: mergeInfo.parts, stats: mergeInfo.stats, voids: mergeInfo.voids, internal: mergeInfo.internal, volumeBefore: mergeInfo.volumeBefore, volumeAfter: mergeInfo.volumeAfter } : fillMerge ? fillMerge.merge : null,
     original: snapBefore, repaired: snapAfter,
     counts: { rawTriangles: count, vertsBefore: before.stats.vertices, vertsAfter: after.stats.vertices, trisBefore: before.stats.triangles, trisAfter: after.stats.triangles },
     format: parsed.format, header: parsed.header, invalidValues: parsed.invalidValues || 0,
   };
 }
 
+/* Collapse edges shorter than maxLen (shortest first) into their midpoint when the collapse is safe: the two ends
+   share no neighbours except the apexes of the two faces on the edge (the surface stays manifold) and no face around
+   them turns by more than about 70 degrees. Removes the microscopic features a boolean leaves behind. */
+function collapseMicroEdges(mesh, maxLen) {
+  mesh.compact();
+  const F = mesh.F, V = mesh.V;
+  let collapsed = 0;
+  for (let round = 0; round < 4; round++) {
+    const topo = buildTopology(mesh), adj = vertexFaces(mesh);
+    const cand = [];
+    for (let e = 0; e < topo.ne; e++) {
+      if (topo.eCnt[e] !== 2) continue;
+      const a = topo.eLo[e], b = topo.eHi[e];
+      const L = Math.hypot(V[a * 3] - V[b * 3], V[a * 3 + 1] - V[b * 3 + 1], V[a * 3 + 2] - V[b * 3 + 2]);
+      if (L < maxLen) cand.push([L, e]);
+    }
+    if (!cand.length) break;
+    cand.sort((x, y) => x[0] - y[0]);
+    const touched = new Uint8Array(mesh.nv); let n = 0;
+    const nrm = [0, 0, 0];
+    for (const [, e] of cand) {
+      const a = topo.eLo[e], b = topo.eHi[e];
+      if (touched[a] || touched[b]) continue;
+      const s1 = topo.eFirst[e], s2 = topo.sNext[s1], f1 = (s1 / 3) | 0, f2 = (s2 / 3) | 0;
+      if (mesh.dead[f1] || mesh.dead[f2]) continue;
+      const apex = new Set();
+      for (const f of [f1, f2]) for (let k = 0; k < 3; k++) { const v = F[f * 3 + k]; if (v !== a && v !== b) apex.add(v); }
+      const nbA = new Set();
+      for (let j = adj.start[a]; j < adj.start[a + 1]; j++) { const f = adj.items[j]; if (mesh.dead[f]) continue; for (let k = 0; k < 3; k++) { const v = F[f * 3 + k]; if (v !== a) nbA.add(v); } }
+      let ok = true;
+      for (let j = adj.start[b]; j < adj.start[b + 1] && ok; j++) { const f = adj.items[j]; if (mesh.dead[f]) continue; for (let k = 0; k < 3; k++) { const v = F[f * 3 + k]; if (v !== b && v !== a && nbA.has(v) && !apex.has(v)) { ok = false; break; } } }
+      if (!ok) continue;
+      const mx = (V[a * 3] + V[b * 3]) / 2, my = (V[a * 3 + 1] + V[b * 3 + 1]) / 2, mz = (V[a * 3 + 2] + V[b * 3 + 2]) / 2;
+      // no surviving face may turn over
+      for (const v of [a, b]) for (let j = adj.start[v]; j < adj.start[v + 1] && ok; j++) {
+        const f = adj.items[j]; if (mesh.dead[f] || f === f1 || f === f2) continue;
+        faceNormalInto(V, F, f, nrm); const before = [nrm[0], nrm[1], nrm[2]];
+        const P = [0, 1, 2].map((k) => { const x = F[f * 3 + k]; return x === a || x === b ? [mx, my, mz] : [V[x * 3], V[x * 3 + 1], V[x * 3 + 2]]; });
+        const ux = P[1][0] - P[0][0], uy = P[1][1] - P[0][1], uz = P[1][2] - P[0][2], wx = P[2][0] - P[0][0], wy = P[2][1] - P[0][1], wz = P[2][2] - P[0][2];
+        const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, l = Math.hypot(nx, ny, nz);
+        if (!(l > 0) || (nx * before[0] + ny * before[1] + nz * before[2]) / l < 0.35) ok = false;
+      }
+      if (!ok) continue;
+      V[a * 3] = mx; V[a * 3 + 1] = my; V[a * 3 + 2] = mz;
+      for (let j = adj.start[b]; j < adj.start[b + 1]; j++) { const f = adj.items[j]; if (mesh.dead[f]) continue; for (let k = 0; k < 3; k++) if (F[f * 3 + k] === b) F[f * 3 + k] = a; }
+      mesh.killFace(f1); mesh.killFace(f2);
+      touched[a] = 1; touched[b] = 1;
+      for (const v of apex) touched[v] = 1;
+      n++;
+    }
+    collapsed += n; mesh.compact();
+    if (!n) break;
+  }
+  return collapsed;
+}
+
+/* Distinct vertices that round to the same float32 position are moved a few float steps into their own fan
+   (toward the centre of their ring of neighbours). Returns how many vertices moved. */
+function separateCoincidentVertices(mesh, maxAbs, diag) {
+  const nv = mesh.nv, F = mesh.F, V = mesh.V;
+  const used = new Uint8Array(nv); for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f]) { used[F[f * 3]] = 1; used[F[f * 3 + 1]] = 1; used[F[f * 3 + 2]] = 1; }
+  const ulp = Math.pow(2, Math.ceil(Math.log2(maxAbs || 1)) - 23);   // float32 step at the largest coordinate
+  const step = Math.max(8 * ulp, 1e-6 * diag);
+  const f32 = new Float32Array(3);
+  let moved = 0;
+  for (let round = 0; round < 4; round++) {
+    const groups = new Map();
+    for (let v = 0; v < nv; v++) {
+      if (!used[v]) continue;
+      f32[0] = V[v * 3]; f32[1] = V[v * 3 + 1]; f32[2] = V[v * 3 + 2];
+      const k = f32[0] + ',' + f32[1] + ',' + f32[2];
+      let g = groups.get(k); if (!g) groups.set(k, g = []); g.push(v);
+    }
+    const clash = [];
+    for (const g of groups.values()) if (g.length > 1) for (const v of g) clash.push(v);
+    if (!clash.length) break;
+    // direction: toward the centre of the vertex's own ring of neighbours, which lies inside its own fan
+    const dir = new Float64Array(nv * 3), cnt = new Float64Array(nv), set = new Set(clash);
+    for (let f = 0; f < mesh.nf; f++) {
+      if (mesh.dead[f]) continue;
+      for (let c = 0; c < 3; c++) {
+        const v = F[f * 3 + c]; if (!set.has(v)) continue;
+        for (let d = 1; d <= 2; d++) { const w = F[f * 3 + (c + d) % 3]; dir[v * 3] += V[w * 3] - V[v * 3]; dir[v * 3 + 1] += V[w * 3 + 1] - V[v * 3 + 1]; dir[v * 3 + 2] += V[w * 3 + 2] - V[v * 3 + 2]; cnt[v] += 1; }
+      }
+    }
+    for (const v of clash) {
+      const l = Math.hypot(dir[v * 3], dir[v * 3 + 1], dir[v * 3 + 2]); if (!(l > 0)) continue;
+      const d = step * (round + 1);
+      V[v * 3] += dir[v * 3] / l * d; V[v * 3 + 1] += dir[v * 3 + 1] / l * d; V[v * 3 + 2] += dir[v * 3 + 2] / l * d; moved++;
+    }
+  }
+  return moved;
+}
+/* Test points just inside and just outside every part's surface (up to 40 per part, spread over its faces):
+   "solid in the union" is winding >= 1 of the original parts, and the merged surface must say the same there.
+   Points closer to another surface than the step are skipped. */
+function unionAgrees(orig, merged, diag) {
+  const W0 = windingIndex(orig.V, orig.F, orig.nf, orig.dead);
+  const W1 = windingIndex(merged.V, merged.F, merged.nf, merged.dead);
+  const perPart = new Map();
+  for (let f = 0; f < orig.nf; f++) { const c = orig.comp[f]; if (c < 0) continue; let l = perPart.get(c); if (!l) perPart.set(c, l = []); l.push(f); }
+  const n = [0, 0, 0]; let total = 0, bad = 0; const badParts = new Set();
+  for (const [part, faces] of perPart) {
+    const sorted = faces.slice().sort((a, b) => faceNormalInto(orig.V, orig.F, b, n) - faceNormalInto(orig.V, orig.F, a, n));
+    const step = Math.max(1, Math.floor(sorted.length / 40));
+    for (let i = 0, k = 0; i < sorted.length && k < 40; i += step, k++) {
+      const f = sorted[i], V = orig.V, F = orig.F;
+      const area = faceNormalInto(V, F, f, n); if (!(area > 0)) continue;
+      const a = F[f * 3] * 3, b = F[f * 3 + 1] * 3, c = F[f * 3 + 2] * 3;
+      const la = Math.hypot(V[b] - V[c], V[b + 1] - V[c + 1], V[b + 2] - V[c + 2]), lb = Math.hypot(V[c] - V[a], V[c + 1] - V[a + 1], V[c + 2] - V[a + 2]), lc = Math.hypot(V[a] - V[b], V[a + 1] - V[b + 1], V[a + 2] - V[b + 2]);
+      const per = la + lb + lc, r = 2 * area / per, h = Math.min(1e-4 * diag, 0.25 * r);
+      if (h < 1e-6 * diag) continue;
+      const cx = (la * V[a] + lb * V[b] + lc * V[c]) / per, cy = (la * V[a + 1] + lb * V[b + 1] + lc * V[c + 1]) / per, cz = (la * V[a + 2] + lb * V[b + 2] + lc * V[c + 2]) / per;
+      for (const sgn of [1, -1]) {
+        const x = cx + sgn * h * n[0], y = cy + sgn * h * n[1], z = cz + sgn * h * n[2];
+        const w0 = W0.at(x, y, z) >= 1, w1 = W1.at(x, y, z) >= 1;
+        total++; if (w0 !== w1) { bad++; badParts.add(part); if (api._agreeDbg) api._agreeDbg.push({ part, f, sgn, h, w0: W0.at(x, y, z), w1: W1.at(x, y, z), p: [x, y, z] }); }
+      }
+    }
+  }
+  // a handful of disagreements come from test points that land within float noise of a surface
+  return { ok: bad <= Math.max(2, 0.005 * total), bad, total, badParts: [...badParts] };
+}
+function signedVolumeOf(mesh) { let v = 0; for (let f = 0; f < mesh.nf; f++) if (!mesh.dead[f]) v += det3(mesh.V, mesh.F[f * 3], mesh.F[f * 3 + 1], mesh.F[f * 3 + 2]); return v / 6; }
 function fmtTol(t) { if (t >= 1) return t.toFixed(3); if (t >= 1e-3) return t.toFixed(4); return t.toExponential(2); }
 function now() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
 
@@ -1597,7 +1931,7 @@ function removeSlivers(mesh, degTol, diag, maxRounds) {
 }
 
 /* ------------------------------------------------------ self-intersections */
-function triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps) {
+function triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps, lenEps) {
   const p = (i, k) => V[i * 3 + k];
   // plane of B
   let e1x = p(b1, 0) - p(b0, 0), e1y = p(b1, 1) - p(b0, 1), e1z = p(b1, 2) - p(b0, 2);
@@ -1609,8 +1943,9 @@ function triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps) {
   let da0 = n2x * p(a0, 0) + n2y * p(a0, 1) + n2z * p(a0, 2) + d2; if (Math.abs(da0) < tol2) da0 = 0;
   let da1 = n2x * p(a1, 0) + n2y * p(a1, 1) + n2z * p(a1, 2) + d2; if (Math.abs(da1) < tol2) da1 = 0;
   let da2 = n2x * p(a2, 0) + n2y * p(a2, 1) + n2z * p(a2, 2) + d2; if (Math.abs(da2) < tol2) da2 = 0;
-  if ((da0 > 0 && da1 > 0 && da2 > 0) || (da0 < 0 && da1 < 0 && da2 < 0)) return false;
-  if (da0 === 0 && da1 === 0 && da2 === 0) return false; // coplanar: ignored
+  // a real crossing has corners strictly on both sides of the other plane; touching along an edge or a
+  // point (zero penetration) and coplanar contact are not counted
+  if (!((da0 > 0 || da1 > 0 || da2 > 0) && (da0 < 0 || da1 < 0 || da2 < 0))) return false;
   // plane of A
   e1x = p(a1, 0) - p(a0, 0); e1y = p(a1, 1) - p(a0, 1); e1z = p(a1, 2) - p(a0, 2);
   e2x = p(a2, 0) - p(a0, 0); e2y = p(a2, 1) - p(a0, 1); e2z = p(a2, 2) - p(a0, 2);
@@ -1621,7 +1956,7 @@ function triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps) {
   let db0 = n1x * p(b0, 0) + n1y * p(b0, 1) + n1z * p(b0, 2) + d1; if (Math.abs(db0) < tol1) db0 = 0;
   let db1 = n1x * p(b1, 0) + n1y * p(b1, 1) + n1z * p(b1, 2) + d1; if (Math.abs(db1) < tol1) db1 = 0;
   let db2 = n1x * p(b2, 0) + n1y * p(b2, 1) + n1z * p(b2, 2) + d1; if (Math.abs(db2) < tol1) db2 = 0;
-  if ((db0 > 0 && db1 > 0 && db2 > 0) || (db0 < 0 && db1 < 0 && db2 < 0)) return false;
+  if (!((db0 > 0 || db1 > 0 || db2 > 0) && (db0 < 0 || db1 < 0 || db2 < 0))) return false;
   // intersection line direction, pick the dominant axis
   const Dx = n1y * n2z - n1z * n2y, Dy = n1z * n2x - n1x * n2z, Dz = n1x * n2y - n1y * n2x;
   let axis = 0, m = Math.abs(Dx); if (Math.abs(Dy) > m) { m = Math.abs(Dy); axis = 1; } if (Math.abs(Dz) > m) axis = 2;
@@ -1636,10 +1971,37 @@ function triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps) {
   const ia = iv(p(a0, axis), p(a1, axis), p(a2, axis), da0, da1, da2); if (!ia) return false;
   const ib = iv(p(b0, axis), p(b1, axis), p(b2, axis), db0, db1, db2); if (!ib) return false;
   const a_lo = Math.min(ia[0], ia[1]), a_hi = Math.max(ia[0], ia[1]), b_lo = Math.min(ib[0], ib[1]), b_hi = Math.max(ib[0], ib[1]);
-  return Math.max(a_lo, b_lo) < Math.min(a_hi, b_hi) - eps;
+  // depth decides whether the triangles really pass through each other (eps); once they do, any overlap of their
+  // intervals on the meeting line counts, however short
+  return Math.max(a_lo, b_lo) < Math.min(a_hi, b_hi) - (lenEps === undefined ? eps : lenEps);
 }
 
-function findSelfIntersections(mesh, maxList) {
+function findSelfIntersections(mesh, maxList, penTol) {
+  const V = mesh.V, F = mesh.F;
+  // two triangles cross only if each has a corner deeper than float32 noise on both sides of the other's plane
+  let eps = penTol;
+  if (!(eps > 0)) { const bb = bbox(V, mesh.nv); let mx = 0; for (let i = 0; i < mesh.nv * 3; i++) { const a = Math.abs(V[i]); if (a > mx) mx = a; } eps = 4e-7 * Math.max(mx, bb.diag || 1); }
+  const hit = new Uint8Array(mesh.nf); let pairs = 0;
+  const lenEps = 1e-9 * (bbox(V, mesh.nv).diag || 1);
+  const done = forEachOverlappingPair(mesh, (f, g) => {
+    if (triTriIntersect(V, F[f * 3], F[f * 3 + 1], F[f * 3 + 2], F[g * 3], F[g * 3 + 1], F[g * 3 + 2], eps, lenEps)) { pairs++; hit[f] = 1; hit[g] = 1; }
+  }, 6e7);
+  const faces = []; for (let f = 0; f < mesh.nf && faces.length < (maxList || 200000); f++) if (hit[f]) faces.push(f);
+  return { pairs, faces: Uint32Array.from(faces), truncated: !done };
+}
+
+/* ============================================================ merging parts
+   Exact union of overlapping shells (a mesh boolean). Every pair of crossing
+   triangles is cut along its intersection segment; each resulting piece is kept
+   only if it lies on the boundary of the union: winding number 0 just outside
+   the piece and at least 1 just inside it. Geometry hidden inside another part
+   (bullets in a grip, overlapping halves, internal walls) is dropped, and the
+   pieces that remain meet exactly along the intersection curves.
+   ========================================================================== */
+
+/* broad phase shared by self-intersection detection and merging: calls fn(f, g) once for
+   every pair of live faces whose bounding boxes overlap and that share no vertex */
+function forEachOverlappingPair(mesh, fn, budget, allowShared) {
   const nf = mesh.nf, F = mesh.F, V = mesh.V, dead = mesh.dead;
   let alive = 0; const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   const fb = new Float64Array(nf * 6);
@@ -1649,9 +2011,8 @@ function findSelfIntersections(mesh, maxList) {
     for (let c = 0; c < 3; c++) { const v = F[f * 3 + c] * 3; for (let k = 0; k < 3; k++) { const x = V[v + k]; if (x < fb[f * 6 + k]) fb[f * 6 + k] = x; if (x > fb[f * 6 + 3 + k]) fb[f * 6 + 3 + k] = x; } }
     for (let k = 0; k < 3; k++) { if (fb[f * 6 + k] < mn[k]) mn[k] = fb[f * 6 + k]; if (fb[f * 6 + 3 + k] > mx[k]) mx[k] = fb[f * 6 + 3 + k]; }
   }
-  if (alive < 2) return { pairs: 0, faces: new Uint32Array(0) };
+  if (alive < 2) return true;
   const ex = [Math.max(mx[0] - mn[0], 1e-9), Math.max(mx[1] - mn[1], 1e-9), Math.max(mx[2] - mn[2], 1e-9)];
-  const diag = Math.hypot(ex[0], ex[1], ex[2]);
   const targetCells = Math.max(1, alive / 3);
   const base = Math.cbrt(targetCells / (ex[0] * ex[1] * ex[2]));
   const res = [0, 1, 2].map((k) => Math.max(1, Math.min(200, Math.ceil(ex[k] * base))));
@@ -1671,27 +2032,875 @@ function findSelfIntersections(mesh, maxList) {
     if (dead[f]) continue;
     for (let i = lo[f * 3]; i <= hi[f * 3]; i++) for (let j = lo[f * 3 + 1]; j <= hi[f * 3 + 1]; j++) for (let k = lo[f * 3 + 2]; k <= hi[f * 3 + 2]; k++) items[fill[(i * res[1] + j) * res[2] + k]++] = f;
   }
-  const eps = 1e-9 * diag;
-  const hit = new Uint8Array(nf); let pairs = 0; let budget = 6e7;
-  for (let c = 0; c < ncell && budget > 0; c++) {
+  let left = budget || Infinity;
+  for (let c = 0; c < ncell; c++) {
     const ci = (c / (res[1] * res[2])) | 0, cj = ((c / res[2]) | 0) % res[1], ck = c % res[2];
     const s = count[c], e = count[c + 1];
     for (let p = s; p < e; p++) {
       const f = items[p];
       for (let q = p + 1; q < e; q++) {
-        const g = items[q]; budget--;
-        // bbox overlap
+        const g = items[q];
+        if (--left < 0) return false;
         if (fb[f * 6] > fb[g * 6 + 3] || fb[g * 6] > fb[f * 6 + 3] || fb[f * 6 + 1] > fb[g * 6 + 4] || fb[g * 6 + 1] > fb[f * 6 + 4] || fb[f * 6 + 2] > fb[g * 6 + 5] || fb[g * 6 + 2] > fb[f * 6 + 5]) continue;
-        // test each pair once: in the cell holding the min corner of the overlap box
+        // each pair once: in the cell holding the min corner of the overlap box
         if (Math.max(lo[f * 3], lo[g * 3]) !== ci || Math.max(lo[f * 3 + 1], lo[g * 3 + 1]) !== cj || Math.max(lo[f * 3 + 2], lo[g * 3 + 2]) !== ck) continue;
         const a0 = F[f * 3], a1 = F[f * 3 + 1], a2 = F[f * 3 + 2], b0 = F[g * 3], b1 = F[g * 3 + 1], b2 = F[g * 3 + 2];
-        if (a0 === b0 || a0 === b1 || a0 === b2 || a1 === b0 || a1 === b1 || a1 === b2 || a2 === b0 || a2 === b1 || a2 === b2) continue;
-        if (triTriIntersect(V, a0, a1, a2, b0, b1, b2, eps)) { pairs++; hit[f] = 1; hit[g] = 1; }
+        if ((a0 === b0 || a0 === b1 || a0 === b2 || a1 === b0 || a1 === b1 || a1 === b2 || a2 === b0 || a2 === b1 || a2 === b2) && !(allowShared && allowShared(f, g))) continue;
+        fn(f, g);
       }
     }
   }
-  const faces = []; for (let f = 0; f < nf && faces.length < (maxList || 200000); f++) if (hit[f]) faces.push(f);
-  return { pairs, faces: Uint32Array.from(faces), truncated: budget <= 0 };
+  return true;
+}
+
+/* winding number of an oriented triangle mesh at arbitrary points. Rays go along +x, +y
+   and +z through three 2D grids of projected faces; the median of the three counts is
+   robust against a ray that grazes an edge. */
+function windingIndex(V, F, nf, dead, onlyFace) {
+  const use = (f) => !(dead && dead[f]) && (!onlyFace || onlyFace(f));
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  let alive = 0;
+  for (let f = 0; f < nf; f++) {
+    if (!use(f)) continue; alive++;
+    for (let c = 0; c < 3; c++) { const v = F[f * 3 + c] * 3; for (let k = 0; k < 3; k++) { const x = V[v + k]; if (x < mn[k]) mn[k] = x; if (x > mx[k]) mx[k] = x; } }
+  }
+  if (!alive) return { at() { return 0; } };
+  const diag = Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) || 1;
+  const res = Math.max(1, Math.min(512, Math.round(Math.sqrt(alive / 2))));
+  const grids = [];
+  for (let axis = 0; axis < 3; axis++) {
+    const u = (axis + 1) % 3, w = (axis + 2) % 3;
+    const su = (mx[u] - mn[u]) || 1, sw = (mx[w] - mn[w]) || 1;
+    const cu = (x) => { const i = Math.floor((x - mn[u]) / su * res); return i < 0 ? 0 : i >= res ? res - 1 : i; };
+    const cw = (x) => { const i = Math.floor((x - mn[w]) / sw * res); return i < 0 ? 0 : i >= res ? res - 1 : i; };
+    const cnt = new Int32Array(res * res + 1), rng = new Int32Array(nf * 4);
+    for (let f = 0; f < nf; f++) {
+      if (!use(f)) continue;
+      let u0 = Infinity, u1 = -Infinity, w0 = Infinity, w1 = -Infinity;
+      for (let c = 0; c < 3; c++) { const v = F[f * 3 + c] * 3; const a = V[v + u], b = V[v + w]; if (a < u0) u0 = a; if (a > u1) u1 = a; if (b < w0) w0 = b; if (b > w1) w1 = b; }
+      const i0 = cu(u0), i1 = cu(u1), j0 = cw(w0), j1 = cw(w1);
+      rng[f * 4] = i0; rng[f * 4 + 1] = i1; rng[f * 4 + 2] = j0; rng[f * 4 + 3] = j1;
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) cnt[i * res + j + 1]++;
+    }
+    for (let c = 0; c < res * res; c++) cnt[c + 1] += cnt[c];
+    const items = new Int32Array(cnt[res * res]); const fill = cnt.slice(0, res * res);
+    for (let f = 0; f < nf; f++) { if (!use(f)) continue; for (let i = rng[f * 4]; i <= rng[f * 4 + 1]; i++) for (let j = rng[f * 4 + 2]; j <= rng[f * 4 + 3]; j++) items[fill[i * res + j]++] = f; }
+    grids.push({ axis, u, w, cu, cw, cnt, items });
+  }
+  const jit = 1e-9 * diag, p = [0, 0, 0];
+  const ray = (g) => {
+    const pu = p[g.u] + jit * 0.70710678, pw = p[g.w] + jit * 0.31830989, pa = p[g.axis];
+    const c = g.cu(pu) * res + g.cw(pw);
+    let wn = 0;
+    for (let it = g.cnt[c]; it < g.cnt[c + 1]; it++) {
+      const f = g.items[it];
+      const a = F[f * 3] * 3, b = F[f * 3 + 1] * 3, d = F[f * 3 + 2] * 3;
+      const au = V[a + g.u] - pu, aw = V[a + g.w] - pw, bu = V[b + g.u] - pu, bw = V[b + g.w] - pw, du = V[d + g.u] - pu, dw = V[d + g.w] - pw;
+      const d1 = au * bw - aw * bu, d2 = bu * dw - bw * du, d3 = du * aw - dw * au;
+      if (!((d1 > 0 && d2 > 0 && d3 > 0) || (d1 < 0 && d2 < 0 && d3 < 0))) continue;
+      const tot = d1 + d2 + d3;
+      const x = (V[a + g.axis] * d2 + V[b + g.axis] * d3 + V[d + g.axis] * d1) / tot;
+      if (x > pa) wn += tot > 0 ? 1 : -1;
+    }
+    return wn;
+  };
+  return {
+    at(x, y, z) {
+      p[0] = x; p[1] = y; p[2] = z;
+      const a = ray(grids[0]), b = ray(grids[1]), c = ray(grids[2]);
+      return a <= b ? (b <= c ? b : (a <= c ? c : a)) : (a <= c ? a : (b <= c ? c : b));
+    },
+  };
+}
+
+/* triangulate points inside one triangle with required (constraint) edges. Greedy: all
+   constraints first, then the shortest edges that cross nothing; faces are the empty
+   3-cycles of the resulting maximal planar graph. Returns [i,j,k,...] or null. */
+function greedyTriangulate(xs, ys, cons, eps) {
+  const n = xs.length;
+  const orient = (a, b, c) => (xs[b] - xs[a]) * (ys[c] - ys[a]) - (ys[b] - ys[a]) * (xs[c] - xs[a]);
+  const accSet = new Set(), acc = [], adj = [];
+  for (let i = 0; i < n; i++) adj.push(new Set());
+  const add = (i, j) => { const k = i < j ? i * n + j : j * n + i; if (accSet.has(k)) return; accSet.add(k); acc.push(i, j); adj[i].add(j); adj[j].add(i); };
+  const crosses = (a, b, c, d) => {
+    if (a === c || a === d || b === c || b === d) return false;
+    const o1 = orient(a, b, c), o2 = orient(a, b, d);
+    if (!((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0))) return false;
+    const o3 = orient(c, d, a), o4 = orient(c, d, b);
+    return (o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0);
+  };
+  const onSeg = (m, a, b) => {
+    const dx = xs[b] - xs[a], dy = ys[b] - ys[a], L2 = dx * dx + dy * dy; if (!L2) return false;
+    const t = ((xs[m] - xs[a]) * dx + (ys[m] - ys[a]) * dy) / L2; if (t <= 0 || t >= 1) return false;
+    const px = xs[a] + t * dx - xs[m], py = ys[a] + t * dy - ys[m]; return px * px + py * py <= eps * eps;
+  };
+  for (const [i, j] of cons) if (i !== j) add(i, j);
+  for (let p = 0; p < acc.length; p += 2) for (let q = p + 2; q < acc.length; q += 2) if (crosses(acc[p], acc[p + 1], acc[q], acc[q + 1])) return null;
+  const cand = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    if (accSet.has(i * n + j)) continue;
+    let blocked = false; for (let m = 0; m < n && !blocked; m++) if (m !== i && m !== j && onSeg(m, i, j)) blocked = true;
+    if (!blocked) cand.push([i, j, (xs[j] - xs[i]) ** 2 + (ys[j] - ys[i]) ** 2]);
+  }
+  cand.sort((a, b) => a[2] - b[2]);
+  for (const [i, j] of cand) {
+    let ok = true;
+    for (let p = 0; p < acc.length; p += 2) if (crosses(i, j, acc[p], acc[p + 1])) { ok = false; break; }
+    if (ok) add(i, j);
+  }
+  const area0 = Math.abs(orient(0, 1, 2)), tiny = 1e-12 * area0;
+  const tris = [];
+  for (let i = 0; i < n; i++) for (const j of adj[i]) {
+    if (j <= i) continue;
+    for (const k of adj[j]) {
+      if (k <= j || !adj[i].has(k)) continue;
+      const o = orient(i, j, k); if (Math.abs(o) <= tiny) continue;
+      let empty = true;
+      for (let m = 0; m < n && empty; m++) {
+        if (m === i || m === j || m === k) continue;
+        const o1 = orient(i, j, m), o2 = orient(j, k, m), o3 = orient(k, i, m);
+        if (o > 0 ? (o1 > 0 && o2 > 0 && o3 > 0) : (o1 < 0 && o2 < 0 && o3 < 0)) empty = false;
+      }
+      if (empty) tris.push(i, j, k);
+    }
+  }
+  return tris;
+}
+
+/* mesh: closed, outward-oriented shells (the repair result). comp: face -> shell id.
+   Returns the union as a new Mesh plus the source shell of every output face.
+   The input mesh is not modified.
+
+   Cutting is exact: the model is placed on an integer grid finer than float32 precision, every cut point is an
+   exact rational (BigInt numerators over a common denominator), and two cut points are the same point exactly when
+   their values are equal. Both faces along a cut therefore see the same points, and every cut closes. */
+function mergeShells(mesh, comp, opts) {
+  mesh.compact();
+  const nf0 = mesh.nf, nv0 = mesh.nv, V0 = mesh.V;
+  const stats = { intersectingPairs: 0, coplanarPairs: 0, splitFaces: 0, failedFaces: 0, droppedRegions: 0, keptRegions: 0, droppedFaces: 0, triplePoints: 0, weldedVertices: 0, fail: {} };
+  const T0 = now(), tm = {}; stats.ms = tm;
+  const failWhy = (k) => { stats.fail[k] = (stats.fail[k] || 0) + 1; return null; };
+  const bb = bbox(V0, nv0);
+  let maxAbs = 0; for (let i = 0; i < nv0 * 3; i++) { const a = Math.abs(V0[i]); if (a > maxAbs) maxAbs = a; }
+  const scale = Math.max(maxAbs, bb.diag) || 1;
+  const weldTol = 4e-7 * scale, weldTol2 = weldTol * weldTol;
+  const cellKey = (x, y, z) => (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) | 0;
+  const Bg = BigInt;
+
+  /* ---- 0. vertices of different parts at the same spot (float32 noise) become one vertex ---- */
+  const F0 = mesh.F.slice(0, nf0 * 3), dead0 = new Uint8Array(nf0);
+  {
+    const vshell = new Int32Array(nv0).fill(-1);
+    for (let f = 0; f < nf0; f++) for (let k = 0; k < 3; k++) vshell[F0[f * 3 + k]] = comp[f];
+    const vp = new Int32Array(nv0); for (let i = 0; i < nv0; i++) vp[i] = i;
+    const vf = (a) => { while (vp[a] !== a) { vp[a] = vp[vp[a]]; a = vp[a]; } return a; };
+    const cells = new Map(), inv = 1 / weldTol;
+    for (let v = 0; v < nv0; v++) {
+      if (vshell[v] < 0) continue;
+      const k = cellKey(Math.floor(V0[v * 3] * inv), Math.floor(V0[v * 3 + 1] * inv), Math.floor(V0[v * 3 + 2] * inv));
+      let a = cells.get(k); if (!a) cells.set(k, a = []); a.push(v);
+    }
+    for (let v = 0; v < nv0; v++) {
+      if (vshell[v] < 0) continue;
+      const cx = Math.floor(V0[v * 3] * inv), cy = Math.floor(V0[v * 3 + 1] * inv), cz = Math.floor(V0[v * 3 + 2] * inv);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const a = cells.get(cellKey(cx + dx, cy + dy, cz + dz)); if (!a) continue;
+        for (const o of a) {
+          if (o <= v || vshell[o] === vshell[v]) continue;
+          const ex = V0[o * 3] - V0[v * 3], ey = V0[o * 3 + 1] - V0[v * 3 + 1], ez = V0[o * 3 + 2] - V0[v * 3 + 2];
+          if (ex * ex + ey * ey + ez * ez > weldTol2) continue;
+          const ra = vf(v), rb = vf(o); if (ra === rb) continue;
+          if (ra < rb) vp[rb] = ra; else vp[ra] = rb; stats.weldedVertices++;
+        }
+      }
+    }
+    if (stats.weldedVertices) for (let i = 0; i < nf0 * 3; i++) F0[i] = vf(F0[i]);
+  }
+
+  /* ---- 0b. flush contacts on axis-aligned faces. Two faces of different parts that are both flat across an axis
+     (up to float32 noise), face each other within that noise and overlap, touch: all their vertices move exactly onto
+     one common plane, so the contact becomes an exact flush pair. ---- */
+  const VS = V0.slice(0, nv0 * 3);
+  {
+    const flushTol = 4 * weldTol, flat = 2 * weldTol;
+    for (let axis = 0; axis < 3; axis++) {
+      const u = (axis + 1) % 3, w = (axis + 2) % 3;
+      const cand = [];   // [value, face, umin, umax, wmin, wmax, area]
+      for (let f = 0; f < nf0; f++) {
+        if (dead0[f]) continue;
+        const a = F0[f * 3], b = F0[f * 3 + 1], c = F0[f * 3 + 2];
+        const xa = VS[a * 3 + axis], xb = VS[b * 3 + axis], xc = VS[c * 3 + axis];
+        if (Math.max(xa, xb, xc) - Math.min(xa, xb, xc) > flat) continue;
+        const umin = Math.min(V0[a * 3 + u], V0[b * 3 + u], V0[c * 3 + u]), umax = Math.max(V0[a * 3 + u], V0[b * 3 + u], V0[c * 3 + u]);
+        const wmin = Math.min(V0[a * 3 + w], V0[b * 3 + w], V0[c * 3 + w]), wmax = Math.max(V0[a * 3 + w], V0[b * 3 + w], V0[c * 3 + w]);
+        cand.push([(xa + xb + xc) / 3, f, umin, umax, wmin, wmax, (umax - umin) * (wmax - wmin)]);
+      }
+      if (cand.length < 2) continue;
+      cand.sort((p1, p2) => p1[0] - p2[0]);
+      const gp = new Int32Array(cand.length); for (let i = 0; i < cand.length; i++) gp[i] = i;
+      const gf = (x) => { while (gp[x] !== x) { gp[x] = gp[gp[x]]; x = gp[x]; } return x; };
+      let joined = false;
+      for (let i = 0; i < cand.length; i++) {
+        const A = cand[i];
+        for (let j = i + 1; j < cand.length && cand[j][0] - A[0] <= flushTol; j++) {
+          const B = cand[j];
+          if (comp[A[1]] === comp[B[1]]) continue;
+          if (A[3] <= B[2] || B[3] <= A[2] || A[5] <= B[4] || B[5] <= A[4]) continue;   // no overlap across the plane
+          const ra = gf(i), rb = gf(j); if (ra !== rb) { gp[rb] = ra; joined = true; }
+        }
+      }
+      if (!joined) continue;
+      const groups = new Map();
+      for (let i = 0; i < cand.length; i++) { const r = gf(i); let g = groups.get(r); if (!g) groups.set(r, g = []); g.push(i); }
+      for (const g of groups.values()) {
+        if (g.length < 2) continue;
+        // the common plane is the value of the largest face in the contact
+        let best = g[0]; for (const i of g) if (cand[i][6] > cand[best][6]) best = i;
+        const x = cand[best][0];
+        for (const i of g) for (let k = 0; k < 3; k++) { const v = F0[cand[i][1] * 3 + k]; if (VS[v * 3 + axis] !== x) { VS[v * 3 + axis] = x; stats.snappedToFlush = (stats.snappedToFlush || 0) + 1; } }
+      }
+    }
+  }
+
+  /* ---- 1. integer grid: |coordinate| / q < 2^23, so every product of grid differences is exact in a double ---- */
+  const q = Math.pow(2, Math.ceil(Math.log2(maxAbs || 1)) - 23);
+  const QI = new Float64Array(nv0 * 3); for (let i = 0; i < nv0 * 3; i++) QI[i] = Math.round(VS[i] / q);
+  // exact points: homogeneous BigInt (x, y, z, w), w > 0, reduced; original vertices keep their index with w = 1
+  const PX = [], PY = [], PZ = [], PW = []; let DA = new Float64Array(Math.max(64, nv0 * 6)); let np = 0;
+  const pkey = new Map();
+  const gcd = (a, b) => { if (a < 0n) a = -a; if (b < 0n) b = -b; while (b) { const t = a % b; a = b; b = t; } return a; };
+  const pushPoint = (x, y, z, w) => {
+    if ((np + 1) * 3 > DA.length) { const t = new Float64Array(DA.length * 2); t.set(DA); DA = t; }
+    PX.push(x); PY.push(y); PZ.push(z); PW.push(w);
+    DA[np * 3] = Number(x) / Number(w); DA[np * 3 + 1] = Number(y) / Number(w); DA[np * 3 + 2] = Number(z) / Number(w);
+    return np++;
+  };
+  for (let v = 0; v < nv0; v++) pushPoint(Bg(QI[v * 3]), Bg(QI[v * 3 + 1]), Bg(QI[v * 3 + 2]), 1n);
+  {
+    const used = new Uint8Array(nv0); for (let i = 0; i < nf0 * 3; i++) used[F0[i]] = 1;
+    for (let v = 0; v < nv0; v++) if (used[v]) { const key = PX[v] + ',' + PY[v] + ',' + PZ[v] + ',1'; if (!pkey.has(key)) pkey.set(key, v); }
+  }
+  const addExact = (x, y, z, w) => {
+    if (w < 0n) { x = -x; y = -y; z = -z; w = -w; }
+    let g = gcd(gcd(x, y), gcd(z, w)); if (g > 1n) { x /= g; y /= g; z /= g; w /= g; }
+    const key = x + ',' + y + ',' + z + ',' + w;
+    let id = pkey.get(key); if (id !== undefined) return id;
+    id = pushPoint(x, y, z, w); pkey.set(key, id); return id;
+  };
+  // exact planes: normal from grid coordinates is exact in doubles (|component| < 2^49)
+  const N = new Float64Array(nf0 * 3), KAX = new Uint8Array(nf0);
+  for (let f = 0; f < nf0; f++) {
+    const a = F0[f * 3] * 3, b = F0[f * 3 + 1] * 3, c = F0[f * 3 + 2] * 3;
+    const ux = QI[b] - QI[a], uy = QI[b + 1] - QI[a + 1], uz = QI[b + 2] - QI[a + 2], vx = QI[c] - QI[a], vy = QI[c + 1] - QI[a + 1], vz = QI[c + 2] - QI[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    N[f * 3] = nx; N[f * 3 + 1] = ny; N[f * 3 + 2] = nz;
+    if (!nx && !ny && !nz) dead0[f] = 1;
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz); KAX[f] = ax >= ay && ax >= az ? 0 : ay >= az ? 1 : 2;
+  }
+  for (let f = 0; f < nf0; f++) { const a = F0[f * 3], b = F0[f * 3 + 1], c = F0[f * 3 + 2]; if (a === b || b === c || a === c) dead0[f] = 1; }
+  // exact n_f . (v - a_f) for an original vertex v, and its sign (double first, BigInt when too close to call)
+  const planeBig = (v, f) => { const a = F0[f * 3] * 3; return Bg(N[f * 3]) * Bg(QI[v * 3] - QI[a]) + Bg(N[f * 3 + 1]) * Bg(QI[v * 3 + 1] - QI[a + 1]) + Bg(N[f * 3 + 2]) * Bg(QI[v * 3 + 2] - QI[a + 2]); };
+  const planeSign = (v, f) => {
+    const a = F0[f * 3] * 3;
+    const p0 = N[f * 3] * (QI[v * 3] - QI[a]), p1 = N[f * 3 + 1] * (QI[v * 3 + 1] - QI[a + 1]), p2 = N[f * 3 + 2] * (QI[v * 3 + 2] - QI[a + 2]);
+    const val = p0 + p1 + p2, bound = (Math.abs(p0) + Math.abs(p1) + Math.abs(p2)) * 5e-16;
+    if (val > bound) return 1; if (val < -bound) return -1;
+    const e = planeBig(v, f); return e > 0n ? 1 : e < 0n ? -1 : 0;
+  };
+  // the point where original edge (u,w) crosses the plane of face f (u and w strictly on opposite sides, or one on it)
+  const epCache = new Map();
+  const edgePlane = (u, w, f) => {
+    if (u > w) { const t = u; u = w; w = t; }
+    const k = u + ',' + w + ',' + f; let id = epCache.get(k); if (id !== undefined) return id;
+    const du = planeBig(u, f), dw = planeBig(w, f), W = du - dw;
+    id = addExact(PX[w] * du - PX[u] * dw, PY[w] * du - PY[u] * dw, PZ[w] * du - PZ[u] * dw, W);
+    epCache.set(k, id); return id;
+  };
+  // exact 2D orientation of three points in the projection that drops axis k (scaled by positive factors)
+  const coordU = (k) => (k + 1) % 3, coordW = (k) => (k + 2) % 3;
+  const PA = [PX, PY, PZ];
+  const orientBig = (k, p, q2, r) => {
+    const U = PA[coordU(k)], W = PA[coordW(k)];
+    const pw = PW[p], qw = PW[q2], rw = PW[r];
+    return (U[q2] * pw - U[p] * qw) * (W[r] * pw - W[p] * rw) - (W[q2] * pw - W[p] * qw) * (U[r] * pw - U[p] * rw);
+  };
+  const orientSign = (k, p, q2, r) => {
+    const u = coordU(k), w = coordW(k);
+    const pu = DA[p * 3 + u], pv = DA[p * 3 + w], qu = DA[q2 * 3 + u], qv = DA[q2 * 3 + w], ru = DA[r * 3 + u], rv = DA[r * 3 + w];
+    const a = (qu - pu) * (rv - pv), b = (qv - pv) * (ru - pu), val = a - b;
+    const M = Math.max(Math.abs(pu), Math.abs(pv), Math.abs(qu), Math.abs(qv), Math.abs(ru), Math.abs(rv), 1);
+    const bound = 1e-13 * M * (Math.abs(qu - pu) + Math.abs(qv - pv) + Math.abs(ru - pu) + Math.abs(rv - pv)) + 1e-13 * (Math.abs(a) + Math.abs(b));
+    if (val > bound) return 1; if (val < -bound) return -1;
+    const e = orientBig(k, p, q2, r); return e > 0n ? 1 : e < 0n ? -1 : 0;
+  };
+  // p strictly between a and b on the (exactly collinear) segment a-b
+  const between = (k, a, b, p) => {
+    const U = PA[coordU(k)], W = PA[coordW(k)];
+    const aw = PW[a], bw = PW[b], pw = PW[p];
+    const du = U[b] * aw - U[a] * bw, dv = W[b] * aw - W[a] * bw;           // (b - a) * aw * bw
+    const eu = U[p] * aw - U[a] * pw, ev = W[p] * aw - W[a] * pw;           // (p - a) * aw * pw
+    const fu = U[p] * bw - U[b] * pw, fv = W[p] * bw - W[b] * pw;           // (p - b) * bw * pw
+    return eu * du + ev * dv > 0n && fu * du + fv * dv < 0n;
+  };
+  const onSegment = (k, a, b, p) => p !== a && p !== b && orientSign(k, a, b, p) === 0 && between(k, a, b, p);
+  // exact order of points along a segment a->b (for sorting cut pieces)
+  const param = (a, b, p) => { const dx = DA[b * 3] - DA[a * 3], dy = DA[b * 3 + 1] - DA[a * 3 + 1], dz = DA[b * 3 + 2] - DA[a * 3 + 2]; return ((DA[p * 3] - DA[a * 3]) * dx + (DA[p * 3 + 1] - DA[a * 3 + 1]) * dy + (DA[p * 3 + 2] - DA[a * 3 + 2]) * dz) / (dx * dx + dy * dy + dz * dz || 1); };
+  const sortAlong = (a, b, pts) => {
+    const k = (() => { const dx = Math.abs(DA[b * 3] - DA[a * 3]), dy = Math.abs(DA[b * 3 + 1] - DA[a * 3 + 1]), dz = Math.abs(DA[b * 3 + 2] - DA[a * 3 + 2]); return dx >= dy && dx >= dz ? 0 : dy >= dz ? 1 : 2; })();
+    const A = PA[k], dir = (A[b] * PW[a] - A[a] * PW[b]) > 0n ? 1 : -1;
+    return pts.map((p) => [p, param(a, b, p)]).sort((x, y) => {
+      if (Math.abs(x[1] - y[1]) > 1e-9) return x[1] - y[1];
+      const c = A[x[0]] * PW[y[0]] - A[y[0]] * PW[x[0]]; return c === 0n ? 0 : (c > 0n ? dir : -dir);
+    }).map((x) => x[0]);
+  };
+
+  /* ---- 2. cut segments of every crossing pair ---- */
+  const segs = [], segOther = [], faceSegs = new Map(), coplanar = new Map();
+  const pushFaceSeg = (f, s) => { let a = faceSegs.get(f); if (!a) faceSegs.set(f, a = []); a.push(s); };
+  const addSeg = (p, q2, f, g, other) => { const s = segs.length / 4; segs.push(p, q2, f, g); segOther.push(other === undefined ? g : other); pushFaceSeg(f, s); if (g >= 0) pushFaceSeg(g, s); return s; };
+  const ratLess = (n1, d1, n2, d2) => n1 * d2 < n2 * d1;  // d > 0
+  // clip the segment A-B (lying in the plane of face h) against h's triangle; ends on h's edges are named by edgeAt
+  const clip = (h, A, B, edgeAt) => {
+    const k = KAX[h], hs = [F0[h * 3], F0[h * 3 + 1], F0[h * 3 + 2]];
+    const sgn = orientSign(k, hs[0], hs[1], hs[2]); if (!sgn) return null;
+    let t0n = 0n, t0d = 1n, t1n = 1n, t1d = 1n, e0 = -1, e1 = -1;
+    for (let i = 0; i < 3; i++) {
+      const a = hs[i], b = hs[i === 2 ? 0 : i + 1];
+      const sA = orientSign(k, a, b, A) * sgn, sB = orientSign(k, a, b, B) * sgn;
+      if (sA < 0 && sB < 0) return null;
+      if (sA >= 0 && sB >= 0) continue;
+      // exact parameter of the crossing along A->B: oA*BW / (oA*BW - oB*AW) with the true orientations
+      const oA = orientBig(k, a, b, A) * Bg(sgn), oB = orientBig(k, a, b, B) * Bg(sgn);
+      let n = oA * PW[B], d = oA * PW[B] - oB * PW[A]; if (d < 0n) { n = -n; d = -d; }
+      if (sA < 0) { if (ratLess(t0n, t0d, n, d)) { t0n = n; t0d = d; e0 = i; } }
+      else if (ratLess(n, d, t1n, t1d)) { t1n = n; t1d = d; e1 = i; }
+    }
+    if (!ratLess(t0n, t0d, t1n, t1d)) return null;
+    const P = e0 < 0 ? A : edgeAt(hs[e0], hs[e0 === 2 ? 0 : e0 + 1], t0n, t0d);
+    const Q = e1 < 0 ? B : edgeAt(hs[e1], hs[e1 === 2 ? 0 : e1 + 1], t1n, t1d);
+    return P === Q ? null : [P, Q];
+  };
+  // point at parameter t = n/d along A->B (exact)
+  const lerpExact = (A, B, n, d) => {
+    const aw = PW[A], bw = PW[B];
+    return addExact(PX[A] * bw * (d - n) + PX[B] * aw * n, PY[A] * bw * (d - n) + PY[B] * aw * n, PZ[A] * bw * (d - n) + PZ[B] * aw * n, aw * bw * d);
+  };
+  function coplanarPair(f, g) {
+    const k = KAX[f], fv = [F0[f * 3], F0[f * 3 + 1], F0[f * 3 + 2]], gv = [F0[g * 3], F0[g * 3 + 1], F0[g * 3 + 2]];
+    const sf = orientSign(k, fv[0], fv[1], fv[2]), sg = orientSign(k, gv[0], gv[1], gv[2]);
+    if (!sf || !sg) return;
+    const separated = (A, sa, B) => { for (let i = 0; i < 3; i++) { const a = A[i], b = A[i === 2 ? 0 : i + 1]; if (B.every((p) => sa * orientSign(k, a, b, p) <= 0)) return true; } return false; };
+    if (separated(fv, sf, gv) || separated(gv, sg, fv)) return;
+    stats.coplanarPairs++;
+    let l = coplanar.get(f); if (!l) coplanar.set(f, l = []); l.push(g);
+    l = coplanar.get(g); if (!l) coplanar.set(g, l = []); l.push(f);
+    // each face is cut along the other's edges; ends on the host's edges are exact edge-edge crossings
+    for (const [host, other, otherFace] of [[f, gv, g], [g, fv, f]]) {
+      for (let e = 0; e < 3; e++) {
+        const A = other[e], B = other[e === 2 ? 0 : e + 1];
+        const r = clip(host, A, B, (a, b, n, d) => lerpExact(A, B, n, d));
+        if (r) addSeg(r[0], r[1], host, -1, otherFace);
+      }
+    }
+  }
+  tm.prep = Math.round(now() - T0);
+  forEachOverlappingPair({ nf: nf0, nv: nv0, F: F0, V: VS, dead: dead0 }, (f, g) => {
+    const fa = [F0[f * 3], F0[f * 3 + 1], F0[f * 3 + 2]];
+    const sf = [planeSign(fa[0], g), planeSign(fa[1], g), planeSign(fa[2], g)];
+    if ((sf[0] > 0 && sf[1] > 0 && sf[2] > 0) || (sf[0] < 0 && sf[1] < 0 && sf[2] < 0)) return;
+    if (!sf[0] && !sf[1] && !sf[2]) { coplanarPair(f, g); return; }
+    const ga = [F0[g * 3], F0[g * 3 + 1], F0[g * 3 + 2]];
+    if (api._flushDbg) {
+      const nearPlane = (tv, h) => { const nl = Math.hypot(N[h * 3], N[h * 3 + 1], N[h * 3 + 2]) || 1; return tv.every((v) => Math.abs(Number(planeBig(v, h))) / nl <= 4 * weldTol / q); };
+      if (nearPlane(fa, g) && nearPlane(ga, f)) api._flushDbg.push([f, g, comp[f], comp[g]]);
+    }
+    const sg = [planeSign(ga[0], f), planeSign(ga[1], f), planeSign(ga[2], f)];
+    if ((sg[0] > 0 && sg[1] > 0 && sg[2] > 0) || (sg[0] < 0 && sg[1] < 0 && sg[2] < 0)) return;
+    // where f meets g's plane: its vertices on the plane and its edges that cross it
+    const ends = [];
+    for (let i = 0; i < 3; i++) if (!sf[i]) ends.push(fa[i]);
+    for (let i = 0; i < 3; i++) { const j = i === 2 ? 0 : i + 1; if (sf[i] * sf[j] < 0) ends.push(edgePlane(fa[i], fa[j], g)); }
+    if (ends.length !== 2 || ends[0] === ends[1]) return;
+    // the cut is the part of that chord inside g; a clip at g's edge ends where that edge crosses f's plane
+    const r = clip(g, ends[0], ends[1], (a, b) => {
+      const sa = planeSign(a, f), sb = planeSign(b, f);
+      if (!sa) return a; if (!sb) return b;
+      return edgePlane(a, b, f);
+    });
+    if (!r) return;
+    addSeg(r[0], r[1], f, g); stats.intersectingPairs++;
+  }, 0, (f, g) => {
+    let shared = 0;
+    for (let i = 0; i < 3; i++) { const a = F0[f * 3 + i]; if (a === F0[g * 3] || a === F0[g * 3 + 1] || a === F0[g * 3 + 2]) shared++; }
+    return shared === 1;
+  });
+  tm.pairs = Math.round(now() - T0);
+  let splitSet = new Set();
+  if (!segs.length && !coplanar.size) return classifyAndBuild(new Map(), new Set());
+
+  /* ---- 3. crossings of cuts inside a face, points on cuts and points on edges: all exact, all shared ---- */
+  const nseg = segs.length / 4;
+  const splits = []; for (let s = 0; s < nseg; s++) splits.push(new Set());
+  const edgeKey = (a, b) => a < b ? a * nv0 + b : b * nv0 + a;
+  const edgePts = new Map();
+  const regEdge = (a, b, p) => { const ek = edgeKey(a, b); let s = edgePts.get(ek); if (!s) edgePts.set(ek, s = new Set()); if (s.has(p)) return false; s.add(p); return true; };
+  const segPoints = (s) => [segs[s * 4], segs[s * 4 + 1], ...splits[s]];
+  for (let round = 0; round < 12; round++) {
+    let changed = 0;
+    for (const [T, list] of faceSegs) {
+      const k = KAX[T], c = [F0[T * 3], F0[T * 3 + 1], F0[T * 3 + 2]];
+      // a face crossed by many cuts: cuts and points are binned on a grid in the face's projection (approximate
+      // coordinates with a margin), and only neighbours are tested exactly
+      const U = coordU(k), Wd = coordW(k), many = list.length > 32 && !opts.noBins;
+      let G = 1, u0 = 0, w0 = 0, cu = 1, cw = 1;
+      const box = many ? new Float64Array(list.length * 4) : null;
+      if (many) {
+        let u1 = -Infinity, w1 = -Infinity; u0 = Infinity; w0 = Infinity;
+        const pad = 1e-3;   // grid units: far above the rounding of the approximate coordinates
+        for (let i = 0; i < list.length; i++) {
+          const a = segs[list[i] * 4], b = segs[list[i] * 4 + 1];
+          const ua = DA[a * 3 + U], ub = DA[b * 3 + U], wa = DA[a * 3 + Wd], wb = DA[b * 3 + Wd];
+          box[i * 4] = Math.min(ua, ub) - pad; box[i * 4 + 1] = Math.max(ua, ub) + pad; box[i * 4 + 2] = Math.min(wa, wb) - pad; box[i * 4 + 3] = Math.max(wa, wb) + pad;
+          if (box[i * 4] < u0) u0 = box[i * 4]; if (box[i * 4 + 1] > u1) u1 = box[i * 4 + 1]; if (box[i * 4 + 2] < w0) w0 = box[i * 4 + 2]; if (box[i * 4 + 3] > w1) w1 = box[i * 4 + 3];
+        }
+        G = Math.max(1, Math.min(256, Math.ceil(Math.sqrt(list.length))));
+        cu = (u1 - u0) / G || 1; cw = (w1 - w0) / G || 1;
+      }
+      const cellU = (x) => { const i = Math.floor((x - u0) / cu); return i < 0 ? 0 : i >= G ? G - 1 : i; };
+      const cellW = (x) => { const i = Math.floor((x - w0) / cw); return i < 0 ? 0 : i >= G ? G - 1 : i; };
+      const cross2 = (s1, s2) => {
+        const a = segs[s1 * 4], b = segs[s1 * 4 + 1], cc = segs[s2 * 4], d = segs[s2 * 4 + 1];
+        if (a === cc || a === d || b === cc || b === d) return;
+        const oc = orientSign(k, a, b, cc), od = orientSign(k, a, b, d);
+        if (!(oc * od < 0)) return;
+        const oa = orientSign(k, cc, d, a), ob = orientSign(k, cc, d, b);
+        if (!(oa * ob < 0)) return;
+        // exact crossing along c->d
+        const Oc = orientBig(k, a, b, cc), Od = orientBig(k, a, b, d);
+        let n = Oc * PW[d], den = Oc * PW[d] - Od * PW[cc]; if (den < 0n) { n = -n; den = -den; }
+        const X = lerpExact(cc, d, n, den);
+        stats.triplePoints++;
+        if (!splits[s1].has(X)) { splits[s1].add(X); changed++; }
+        if (!splits[s2].has(X)) { splits[s2].add(X); changed++; }
+      };
+      // crossings of two cuts (the cuts do not change between rounds, so they are found in the first one)
+      if (round === 0) {
+        if (!many) { for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) cross2(list[i], list[j]); }
+        else {
+          const cells = new Map();
+          for (let i = 0; i < list.length; i++) for (let x = cellU(box[i * 4]); x <= cellU(box[i * 4 + 1]); x++) for (let y = cellW(box[i * 4 + 2]); y <= cellW(box[i * 4 + 3]); y++) { const key = x * G + y; let l = cells.get(key); if (!l) cells.set(key, l = []); l.push(i); }
+          for (const [key, l] of cells) for (let x = 0; x < l.length; x++) for (let y = x + 1; y < l.length; y++) {
+            const i = l[x], j = l[y];
+            if (box[i * 4] > box[j * 4 + 1] || box[j * 4] > box[i * 4 + 1] || box[i * 4 + 2] > box[j * 4 + 3] || box[j * 4 + 2] > box[i * 4 + 3]) continue;
+            // a pair is tested only in the cell holding the low corner of the overlap of its boxes
+            if (cellU(Math.max(box[i * 4], box[j * 4])) * G + cellW(Math.max(box[i * 4 + 2], box[j * 4 + 2])) !== key) continue;
+            cross2(list[i], list[j]);
+          }
+        }
+      }
+      // every point of this face that lies on one of its cuts or on one of its edges
+      const pts = new Set(c);
+      for (let e = 0; e < 3; e++) { const set = edgePts.get(edgeKey(c[e], c[e === 2 ? 0 : e + 1])); if (set) for (const x of set) pts.add(x); }
+      for (const s of list) for (const x of segPoints(s)) pts.add(x);
+      if (!many) {
+        for (const s of list) {
+          const a = segs[s * 4], b = segs[s * 4 + 1];
+          for (const p of pts) if (!splits[s].has(p) && onSegment(k, a, b, p)) { splits[s].add(p); changed++; }
+        }
+      } else {
+        const pc = new Map();
+        for (const p of pts) { const key = cellU(DA[p * 3 + U]) * G + cellW(DA[p * 3 + Wd]); let l = pc.get(key); if (!l) pc.set(key, l = []); l.push(p); }
+        for (let i = 0; i < list.length; i++) {
+          const s = list[i], a = segs[s * 4], b = segs[s * 4 + 1];
+          for (let x = cellU(box[i * 4]); x <= cellU(box[i * 4 + 1]); x++) for (let y = cellW(box[i * 4 + 2]); y <= cellW(box[i * 4 + 3]); y++) {
+            const l = pc.get(x * G + y); if (!l) continue;
+            for (const p of l) {
+              const pu = DA[p * 3 + U], pw = DA[p * 3 + Wd];
+              if (pu < box[i * 4] || pu > box[i * 4 + 1] || pw < box[i * 4 + 2] || pw > box[i * 4 + 3]) continue;
+              if (!splits[s].has(p) && onSegment(k, a, b, p)) { splits[s].add(p); changed++; }
+            }
+          }
+        }
+      }
+      for (const p of pts) {
+        if (p === c[0] || p === c[1] || p === c[2]) continue;
+        for (let e = 0; e < 3; e++) { const a = c[e], b = c[e === 2 ? 0 : e + 1]; if (onSegment(k, a, b, p) && regEdge(a, b, p)) changed++; }
+      }
+    }
+    if (!changed) break;
+  }
+  splitSet = new Set(faceSegs.keys());
+  tm.points = Math.round(now() - T0);
+  const topo0 = buildTopology({ nf: nf0, F: F0, dead: dead0 });
+  for (const ek of edgePts.keys()) {
+    const u = Math.floor(ek / nv0), w = ek - u * nv0; const e = topo0.findEdge(u, w); if (e < 0) continue;
+    for (let s = topo0.eFirst[e]; s >= 0; s = topo0.sNext[s]) splitSet.add((s / 3) | 0);
+  }
+
+  /* ---- 4. triangulate every affected face along its cuts ---- */
+  const curve = new Set(), results = new Map();
+  for (const T of splitSet) {
+    if (dead0[T]) continue;
+    const tris = splitFace(T);
+    if (tris) { results.set(T, tris); stats.splitFaces++; } else stats.failedFaces++;
+  }
+  function splitFace(T) {
+    const k = KAX[T], c = [F0[T * 3], F0[T * 3 + 1], F0[T * 3 + 2]];
+    const ids = [], idx = new Map();
+    const addP = (id) => { let i = idx.get(id); if (i === undefined) { i = ids.length; ids.push(id); idx.set(id, i); } return i; };
+    c.forEach(addP);
+    const cons = [], seen = new Set();
+    const addCon = (a, b, interior) => { if (a === b) return; const key = a < b ? a + ',' + b : b + ',' + a; if (seen.has(key)) return; seen.add(key); cons.push([addP(a), addP(b), interior]); };
+    const bnd = new Set();
+    for (let e = 0; e < 3; e++) {
+      const a = c[e], b = c[e === 2 ? 0 : e + 1];
+      const set = edgePts.get(edgeKey(a, b));
+      const chain = [a, ...(set ? sortAlong(a, b, [...set]) : []), b];
+      for (let i = 0; i + 1 < chain.length; i++) { addCon(chain[i], chain[i + 1], false); bnd.add(chain[i] < chain[i + 1] ? chain[i] + ',' + chain[i + 1] : chain[i + 1] + ',' + chain[i]); }
+    }
+    for (const s of faceSegs.get(T) || []) {
+      const a = segs[s * 4], b = segs[s * 4 + 1];
+      const chain = [a, ...sortAlong(a, b, [...splits[s]].filter((p) => p !== a && p !== b)), b];
+      for (let i = 0; i + 1 < chain.length; i++) {
+        const x = chain[i], y = chain[i + 1];
+        if (bnd.has(x < y ? x + ',' + y : y + ',' + x)) continue; // lies along the outline
+        // a piece whose ends are on the same edge runs along that edge
+        let along = false;
+        for (let e = 0; e < 3 && !along; e++) { const ea = c[e], eb = c[e === 2 ? 0 : e + 1]; if ((x === ea || x === eb || onSegment(k, ea, eb, x)) && (y === ea || y === eb || onSegment(k, ea, eb, y))) along = true; }
+        if (!along) addCon(x, y, true);
+      }
+    }
+    const n = ids.length;
+    const tris = exactTriangulate(k, ids, cons);
+    if (!tris) return failWhy('triangulation');
+    const sg = orientSign(k, c[0], c[1], c[2]);
+    const out = [];
+    for (let t = 0; t < tris.length; t += 3) {
+      let a = ids[tris[t]], b = ids[tris[t + 1]], cc = ids[tris[t + 2]];
+      if (orientSign(k, a, b, cc) !== sg) { const x = b; b = cc; cc = x; }
+      out.push(a, b, cc);
+    }
+    for (const [i, j, interior] of cons) if (interior) curve.add(ids[i] < ids[j] ? ids[i] + ',' + ids[j] : ids[j] + ',' + ids[i]);
+    if (api._mergeFull) (api._mergeFull.pieces || (api._mergeFull.pieces = [])).push([T, cons.filter((x) => x[2]).map((x) => [ids[x[0]], ids[x[1]]])]);
+    return out;
+  }
+  // greedy constrained triangulation with exact predicates: constraints first, then the shortest edges that cross
+  // nothing and pass through no point; the faces of the resulting maximal planar graph are the triangles
+  function exactTriangulate(k, ids, cons) {
+    const n = ids.length;
+    const o = (i, j, l) => orientSign(k, ids[i], ids[j], ids[l]);
+    const accSet = new Set(), acc = [], adj = [];
+    for (let i = 0; i < n; i++) adj.push(new Set());
+    const add = (i, j) => { const key = i < j ? i * n + j : j * n + i; if (accSet.has(key)) return; accSet.add(key); acc.push(i, j); adj[i].add(j); adj[j].add(i); };
+    const crosses = (a, b, c2, d) => {
+      if (a === c2 || a === d || b === c2 || b === d) return false;
+      const o1 = o(a, b, c2), o2 = o(a, b, d); if (!(o1 * o2 < 0)) return false;
+      const o3 = o(c2, d, a), o4 = o(c2, d, b); return o3 * o4 < 0;
+    };
+    const through = (a, b) => { for (let m = 0; m < n; m++) if (m !== a && m !== b && onSegment(k, ids[a], ids[b], ids[m])) return true; return false; };
+    for (const [i, j] of cons) { if (through(i, j)) return null; add(i, j); }
+    for (let p = 0; p < acc.length; p += 2) for (let r = p + 2; r < acc.length; r += 2) if (crosses(acc[p], acc[p + 1], acc[r], acc[r + 1])) return null;
+    const cand = [];
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      if (accSet.has(i * n + j)) continue;
+      const dx = DA[ids[j] * 3] - DA[ids[i] * 3], dy = DA[ids[j] * 3 + 1] - DA[ids[i] * 3 + 1], dz = DA[ids[j] * 3 + 2] - DA[ids[i] * 3 + 2];
+      cand.push([i, j, dx * dx + dy * dy + dz * dz]);
+    }
+    cand.sort((a, b) => a[2] - b[2]);
+    for (const [i, j] of cand) {
+      let ok = true;
+      for (let p = 0; p < acc.length && ok; p += 2) if (crosses(i, j, acc[p], acc[p + 1])) ok = false;
+      if (ok && through(i, j)) ok = false;
+      if (ok) add(i, j);
+    }
+    const tris = [];
+    for (let i = 0; i < n; i++) for (const j of adj[i]) {
+      if (j <= i) continue;
+      for (const l of adj[j]) {
+        if (l <= j || !adj[i].has(l)) continue;
+        const s = o(i, j, l); if (!s) continue;
+        let empty = true;
+        for (let m = 0; m < n && empty; m++) { if (m === i || m === j || m === l) continue; if (o(i, j, m) === s && o(j, l, m) === s && o(l, i, m) === s) empty = false; }
+        if (empty) tris.push(i, j, l);
+      }
+    }
+    return tris.length ? tris : null;
+  }
+  {
+    const chains = new Map();
+    const chainOf = (a, b) => {
+      const ek = edgeKey(a, b); let ch = chains.get(ek); if (ch) return ch;
+      const lo = a < b ? a : b, hi = a < b ? b : a, set = edgePts.get(ek);
+      ch = [lo, ...(set ? sortAlong(lo, hi, [...set]) : []), hi]; chains.set(ek, ch); return ch;
+    };
+    const key = (x, y) => x < y ? x + ',' + y : y + ',' + x;
+    for (let s = 0; s < nseg; s++) {
+      const a = segs[s * 4], b = segs[s * 4 + 1];
+      const pts = [a, ...sortAlong(a, b, [...splits[s]].filter((p) => p !== a && p !== b)), b];
+      const faces = [segs[s * 4 + 2], segOther[s]].filter((f) => f >= 0);
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const x = pts[i], y = pts[i + 1];
+        curve.add(key(x, y));
+        for (const F of faces) for (let e = 0; e < 3; e++) {
+          const ch = chainOf(F0[F * 3 + e], F0[F * 3 + (e === 2 ? 0 : e + 1)]);
+          const ix = ch.indexOf(x), iy = ch.indexOf(y);
+          if (ix < 0 || iy < 0) continue;
+          for (let j = Math.min(ix, iy); j < Math.max(ix, iy); j++) curve.add(key(ch[j], ch[j + 1]));
+        }
+      }
+    }
+  }
+  tm.split = Math.round(now() - T0);
+  return classifyAndBuild(results, curve);
+
+  /* ---- 5. keep the pieces on the boundary of the union ---- */
+  function classifyAndBuild(results, curveSet) {
+    const V = new Float64Array(Math.max(3, np * 3)); for (let i = 0; i < np * 3; i++) V[i] = DA[i] * q;
+    const outF = [], outShell = [], outParent = [];
+    for (let f = 0; f < nf0; f++) {
+      if (dead0[f]) continue;
+      const r = results.get(f);
+      if (r) { for (let t = 0; t < r.length; t += 3) { outF.push(r[t], r[t + 1], r[t + 2]); outShell.push(comp[f]); outParent.push(f); } }
+      else { outF.push(F0[f * 3], F0[f * 3 + 1], F0[f * 3 + 2]); outShell.push(comp[f]); outParent.push(f); }
+    }
+    const U = { nf: outF.length / 3, F: Uint32Array.from(outF), V, dead: new Uint8Array(outF.length / 3) };
+    const topoU = buildTopology(U);
+    const par = new Int32Array(U.nf); for (let f = 0; f < U.nf; f++) par[f] = f;
+    const fnd = (a) => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+    for (let e = 0; e < topoU.ne; e++) {
+      if (topoU.eCnt[e] !== 2) continue;
+      const s1 = topoU.eFirst[e], s2 = topoU.sNext[s1], f1 = (s1 / 3) | 0, f2 = (s2 / 3) | 0;
+      if (outShell[f1] !== outShell[f2]) continue;
+      if (curveSet.has(topoU.eLo[e] + ',' + topoU.eHi[e])) continue;
+      const r1 = fnd(f1), r2 = fnd(f2); if (r1 !== r2) par[r2] = r1;
+    }
+    const regions = new Map();
+    const n = [0, 0, 0], area = new Float64Array(U.nf);
+    for (let f = 0; f < U.nf; f++) { area[f] = faceNormalInto(V, U.F, f, n); const r = fnd(f); let a = regions.get(r); if (!a) regions.set(r, a = []); a.push(f); }
+    const W = windingIndex(V0, F0, nf0, dead0);
+    let RC = null;
+    const off = Math.max(20 * weldTol, 1e-6 * scale);
+    // a piece that lies on a flush face of another part facing the same way is a duplicate: the lower part keeps it
+    const duplicateOfFlush = (f) => {
+      const p = outParent[f], partners = coplanar.get(p); if (!partners) return false;
+      const k = KAX[p], a = U.F[f * 3], b = U.F[f * 3 + 1], c = U.F[f * 3 + 2];
+      for (const qf of partners) {
+        if (dead0[qf]) continue;
+        const same = N[p * 3] * N[qf * 3] + N[p * 3 + 1] * N[qf * 3 + 1] + N[p * 3 + 2] * N[qf * 3 + 2] > 0;
+        if (!same || !(comp[qf] < comp[p] || (comp[qf] === comp[p] && qf < p))) continue;
+        // the piece lies inside qf when its three corners are inside or on qf and it is not degenerate
+        const qa = F0[qf * 3], qb = F0[qf * 3 + 1], qc = F0[qf * 3 + 2], sq = orientSign(k, qa, qb, qc);
+        let inside = true;
+        for (const v of [a, b, c]) if (orientSign(k, qa, qb, v) * sq < 0 || orientSign(k, qb, qc, v) * sq < 0 || orientSign(k, qc, qa, v) * sq < 0) { inside = false; break; }
+        if (inside) return true;
+      }
+      return false;
+    };
+    const verdict = (f) => {   // 1 keep, 0 drop, -1 no opinion
+      if (!(area[f] > 0)) return -1;
+      if (duplicateOfFlush(f)) return 0;
+      faceNormalInto(V, U.F, f, n);
+      const a = U.F[f * 3] * 3, b = U.F[f * 3 + 1] * 3, c = U.F[f * 3 + 2] * 3;
+      const la = Math.hypot(V[b] - V[c], V[b + 1] - V[c + 1], V[b + 2] - V[c + 2]), lb = Math.hypot(V[c] - V[a], V[c + 1] - V[a + 1], V[c + 2] - V[a + 2]), lc = Math.hypot(V[a] - V[b], V[a + 1] - V[b + 1], V[a + 2] - V[b + 2]);
+      const per = la + lb + lc; if (!(per > 0)) return -1;
+      const r = 2 * area[f] / per; if (r < 4 * weldTol) return -1; // too thin to test reliably: follows its neighbours
+      const cx = (la * V[a] + lb * V[b] + lc * V[c]) / per, cy = (la * V[a + 1] + lb * V[b + 1] + lc * V[c + 1]) / per, cz = (la * V[a + 2] + lb * V[b + 2] + lc * V[c + 2]) / per;
+      const h = Math.min(off, 0.25 * r);
+      // the test points never step across another surface: in a gap (or a sheet) thinner than the step they stay
+      // halfway, so both walls of a hairline gap and the pieces crossing it see the same thing
+      // (only a roughly parallel surface is the far wall of a gap; one crossing the ray at a slant near the piece's
+      // edge is not). A gap too thin to put a test point in gives no opinion.
+      if (opts.gapRays === false) { const wo0 = W.at(cx + h * n[0], cy + h * n[1], cz + h * n[2]), wi0 = W.at(cx - h * n[0], cy - h * n[1], cz - h * n[2]); return wo0 === 0 && wi0 >= 1 ? 1 : 0; }
+      if (!RC) RC = rayCaster(V0, F0, nf0, dead0);
+      const p0 = outParent[f];
+      const wall = (t) => { const g = RC.face; return t < h && g >= 0 && Math.abs(N[g * 3] * n[0] + N[g * 3 + 1] * n[1] + N[g * 3 + 2] * n[2]) >= 0.7 * Math.hypot(N[g * 3], N[g * 3 + 1], N[g * 3 + 2]); };
+      const to = RC.hit(cx, cy, cz, n[0], n[1], n[2], h, p0, weldTol), ho = wall(to) ? to / 2 : h;
+      const ti = RC.hit(cx, cy, cz, -n[0], -n[1], -n[2], h, p0, weldTol), hi = wall(ti) ? ti / 2 : h;
+      if (ho < 2 * weldTol || hi < 2 * weldTol) return -1;
+      const wo = W.at(cx + ho * n[0], cy + ho * n[1], cz + ho * n[2]);
+      const wi = W.at(cx - hi * n[0], cy - hi * n[1], cz - hi * n[2]);
+      return wo === 0 && wi >= 1 ? 1 : 0;
+    };
+    const keep = new Uint8Array(U.nf);
+    // a region can only leak where a cut is open (an odd number of cut pieces meet at a vertex) or a face could not
+    // be cut; everywhere else a region is bounded by closed cuts and is decided as a whole by area-weighted majority
+    const leaky = new Set();
+    {
+      const deg = new Map();
+      for (const k of curveSet) { const i = k.indexOf(','); const x = +k.slice(0, i), y = +k.slice(i + 1); deg.set(x, (deg.get(x) || 0) + 1); deg.set(y, (deg.get(y) || 0) + 1); }
+      const open = new Set(); for (const [v, d] of deg) if (d % 2) open.add(v);
+      for (let f = 0; f < U.nf; f++) {
+        const p = outParent[f];
+        if ((splitSet.has(p) && !results.has(p)) || open.has(U.F[f * 3]) || open.has(U.F[f * 3 + 1]) || open.has(U.F[f * 3 + 2])) leaky.add(fnd(f));
+      }
+    }
+    const untestable = [];
+    for (const [root, faces] of regions) {
+      const sorted = faces.length <= 25 ? faces : faces.slice().sort((p, r) => area[r] - area[p]);
+      const step = Math.max(1, Math.floor(sorted.length / 12));
+      const sample = sorted.length <= 25 ? sorted : sorted.filter((_, i) => i < 13 || i % step === 0).slice(0, 25);
+      let yes = 0, no = 0;
+      for (const f of (opts.perFaceAll ? faces : sample)) { const v = verdict(f); if (v === 1) yes += area[f]; else if (v === 0) no += area[f]; }
+      if (api._mergeFull && yes && no) (api._mergeFull.mixed || (api._mergeFull.mixed = [])).push({ root, faces, yes, no, leaky: leaky.has(root), verdicts: faces.map((f) => verdict(f)) });
+      if (yes && no && (leaky.has(root) || opts.perFaceMixed)) {
+        // this region may leak through an open cut: decide face by face, slivers follow their neighbours
+        stats.mixedRegions = (stats.mixedRegions || 0) + 1;
+        const v = new Map(), queue = [];
+        for (const f of faces) { const x = verdict(f); v.set(f, x); if (x >= 0) queue.push(f); }
+        for (let qi = 0; qi < queue.length; qi++) {
+          const f = queue[qi];
+          for (let k2 = 0; k2 < 3; k2++) {
+            const o = topoU.opp[f * 3 + k2]; if (o < 0) continue;
+            const g = (o / 3) | 0; if (v.get(g) !== -1) continue;
+            v.set(g, v.get(f)); queue.push(g);
+          }
+        }
+        let kept = 0;
+        for (const f of faces) { let x = v.get(f); if (x === -1) x = yes >= no ? 1 : 0; if (x) { keep[f] = 1; kept++; } }
+        if (kept) stats.keptRegions++;
+        if (kept < faces.length) { stats.droppedRegions++; stats.droppedFaces += faces.length - kept; }
+      } else if (yes > no || (yes === no && yes > 0)) { stats.keptRegions++; for (const f of faces) keep[f] = 1; }
+      else {
+        // no piece of the region is big enough to test (a sliver between two nearly coincident cuts): dropped,
+        // the micro-gap it leaves is closed by the repair that follows
+        if (!yes && !no) { stats.untestableRegions = (stats.untestableRegions || 0) + 1; untestable.push(faces); }
+        stats.droppedRegions++; stats.droppedFaces += faces.length;
+      }
+    }
+    // an untestable region (a sliver strip, e.g. where a face of one part crosses a hairline gap between two others)
+    // is decided by closure: along its border, the kept faces of the other regions must pair up with it or without it
+    if (untestable.length) {
+      const inR = new Int32Array(U.nf).fill(-1); untestable.forEach((faces, i) => { for (const f of faces) inR[f] = i; });
+      for (let round = 0; round < 6; round++) {
+        let changed = 0;
+        for (let i = 0; i < untestable.length; i++) {
+          const faces = untestable[i]; let yes = 0, no = 0;
+          for (const f of faces) for (let k = 0; k < 3; k++) {
+            const e = topoU.findEdge(U.F[f * 3 + k], U.F[f * 3 + (k + 1) % 3]); if (e < 0) continue;
+            let mine = 0, others = 0;
+            for (let sl = topoU.eFirst[e], c = 0; c < topoU.eCnt[e]; c++, sl = topoU.sNext[sl]) { const g = (sl / 3) | 0; if (inR[g] === i) mine++; else if (keep[g]) others++; }
+            if (mine !== 1) continue;
+            if (others & 1) yes++; else no++;
+          }
+          const want = yes > no ? 1 : 0;
+          if (want !== keep[faces[0]]) {
+            for (const f of faces) keep[f] = want; changed++;
+            if (want) { stats.keptRegions++; stats.droppedRegions--; stats.droppedFaces -= faces.length; stats.closedUntestable = (stats.closedUntestable || 0) + 1; }
+            else { stats.keptRegions--; stats.droppedRegions++; stats.droppedFaces += faces.length; stats.closedUntestable--; }
+          }
+        }
+        if (!changed) break;
+      }
+    }
+    if (api._mergeFull) api._mergeFull = { regionOf: Int32Array.from({ length: U.nf }, (_, f) => fnd(f)), verdict, area, leaky, mixed: api._mergeFull.mixed, pieces: api._mergeFull.pieces, U, keep, outParent, outShell, curveSet, results, coplanar, dead0, F0, comp, failed: [...splitSet].filter((f) => !results.has(f) && !dead0[f]), faceSegs, segs, V, nv0 };
+    const R = new Mesh(4, 4);
+    const kf = [], ks = [], kp = [];
+    for (let f = 0; f < U.nf; f++) if (keep[f]) { kf.push(U.F[f * 3], U.F[f * 3 + 1], U.F[f * 3 + 2]); ks.push(outShell[f]); kp.push(outParent[f]); }
+    R.V = V; R.nv = np; R.F = Uint32Array.from(kf); R.nf = kf.length / 3;
+    R.src = new Int32Array(Math.max(1, R.nf)).fill(-1); R.flags = new Uint8Array(Math.max(1, R.nf)); R.dead = new Uint8Array(Math.max(1, R.nf)); R.ndead = 0;
+    tm.total = Math.round(now() - T0);
+    return { mesh: R, shellOf: Int32Array.from(ks), parentOf: Int32Array.from(kp), stats, changed: stats.intersectingPairs > 0 || stats.droppedRegions > 0 || stats.coplanarPairs > 0 };
+  }
+}
+
+/* The exact union is rounded to float32 for the file. In thin, nearly coincident spots that can leave a few faces
+   crossing each other. Those faces and their neighbours are removed and the repair refills the small, nearly flat
+   holes; each round takes a wider ring. Returns null when there was nothing to do or nothing improved. */
+function untangleCrossings(mesh, opts, diag) {
+  // the final check counts a crossing when corners go deeper than float32 noise on both sides; aim a little below
+  // that (4 float32 steps at the largest coordinate), so what is left is touching, not crossing
+  let maxAbs = 0; for (let i = 0; i < mesh.nv * 3; i++) { const a = Math.abs(mesh.V[i]); if (a > maxAbs) maxAbs = a; }
+  const fine = 4 * Math.pow(2, Math.floor(Math.log2(maxAbs || 1)) - 23);
+  const cross = (m) => {
+    const a = findSelfIntersections(m, 200000), b = findSelfIntersections(m, 200000, fine);
+    const faces = new Set(a.faces); for (const f of b.faces) faces.add(f);
+    return { pairs: a.pairs + b.pairs, faces };
+  };
+  // worked on exactly what the file will hold: float32 positions, welded by value
+  const toSoup = (m, skip) => {
+    let n = 0; for (let f = 0; f < m.nf; f++) if (!m.dead[f] && !(skip && skip[f])) n++;
+    const soup = new Float32Array(n * 9); let o = 0;
+    for (let f = 0; f < m.nf; f++) {
+      if (m.dead[f] || (skip && skip[f])) continue;
+      for (let c = 0; c < 3; c++) { const v = m.F[f * 3 + c] * 3; soup[o * 9 + c * 3] = m.V[v]; soup[o * 9 + c * 3 + 1] = m.V[v + 1]; soup[o * 9 + c * 3 + 2] = m.V[v + 2]; }
+      o++;
+    }
+    return { soup, n };
+  };
+  const s0 = toSoup(mesh, null);
+  let cur = weldExact(s0.soup, s0.n); cur.dead = new Uint8Array(Math.max(1, cur.src.length)); cur.ndead = 0;
+  let found = cross(cur);
+  if (!found.faces.size) return null;
+  let best = null, bestPairs = found.pairs, removed = 0, rounds = 0;
+  for (let round = 0; round < 8 && found.pairs; round++) {
+    const nf = cur.nf, kill = new Uint8Array(nf);
+    for (const f of found.faces) kill[f] = 1;
+    // first only the crossing faces, then wider rings of their neighbours
+    if (round >= 2) {
+      const vStart = new Int32Array(cur.nv + 1);
+      for (let f = 0; f < nf; f++) if (!cur.dead[f]) for (let c = 0; c < 3; c++) vStart[cur.F[f * 3 + c] + 1]++;
+      for (let v = 0; v < cur.nv; v++) vStart[v + 1] += vStart[v];
+      const vFaces = new Int32Array(vStart[cur.nv]), at = vStart.slice(0, cur.nv);
+      for (let f = 0; f < nf; f++) if (!cur.dead[f]) for (let c = 0; c < 3; c++) vFaces[at[cur.F[f * 3 + c]]++] = f;
+      for (let ring = 0; ring < (round >> 1); ring++) {
+        const add = [];
+        for (let f = 0; f < nf; f++) if (kill[f]) for (let c = 0; c < 3; c++) { const v = cur.F[f * 3 + c]; for (let i = vStart[v]; i < vStart[v + 1]; i++) if (!kill[vFaces[i]]) add.push(vFaces[i]); }
+        for (const g of add) kill[g] = 1;
+      }
+    }
+    const { soup, n } = toSoup(cur, kill);
+    const inner = repair({ tris: soup, normals: null, count: n, format: 'untangle', header: '' }, Object.assign({}, opts, { fillHollows: 0, mergeParts: false, removeInternalParts: true, solidify: false, trace: null, checkSelfIntersections: false }), null);
+    rounds++;
+    if (!inner.after.printable) break;
+    const snap = inner.repaired, M = new Mesh(Math.max(4, snap.nv), Math.max(4, snap.nf));
+    M.V = Float64Array.from(snap.V); M.nv = snap.nv; M.F = Uint32Array.from(snap.F); M.nf = snap.nf;
+    M.src = new Int32Array(Math.max(1, snap.nf)).fill(-1); M.flags = new Uint8Array(Math.max(1, snap.nf)); M.dead = new Uint8Array(Math.max(1, snap.nf)); M.ndead = 0;
+    removed += nf - n;
+    found = cross(M);
+    if (found.pairs < bestPairs) { best = { mesh: M, rounds, removed }; bestPairs = found.pairs; }
+    cur = M;
+  }
+  return best ? { mesh: best.mesh, rounds: best.rounds, removed: best.removed, left: bestPairs } : null;
+}
+
+/* Shells that print as nothing: an outward part hidden inside solid material (winding >= 1
+   all around it), and, after merging, a sealed void that only exists because several parts
+   overlap around it (a designed cavity comes from a single inward-facing shell). */
+function hiddenShells(mesh, topo, shellOf, wasCavity) {
+  const comps = faceComponents(mesh, topo.opp);
+  if (comps.count < 2) return { remove: new Uint8Array(comps.count), comps, parts: 0, voids: 0 };
+  const flip0 = new Uint8Array(mesh.nf);
+  const co = componentOrientation(mesh, topo.opp, comps.comp, comps.count, flip0, null, false);
+  const remove = new Uint8Array(comps.count); let parts = 0, voids = 0;
+  const candidates = []; for (let c = 0; c < comps.count; c++) if (co.closed[c] && co.depth[c] >= 1) candidates.push(c);
+  if (!candidates.length) return { remove, comps, parts, voids };
+  const W = windingIndex(mesh.V, mesh.F, mesh.nf, mesh.dead);
+  const bb = bbox(mesh.V, mesh.nv); const off = 1e-5 * (bb.diag || 1);
+  const n = [0, 0, 0];
+  const byComp = new Map(); for (const c of candidates) byComp.set(c, []);
+  for (let f = 0; f < mesh.nf; f++) { if (mesh.dead[f]) continue; const l = byComp.get(comps.comp[f]); if (l) l.push(f); }
+  for (const c of candidates) {
+    const faces = byComp.get(c);
+    if (co.vol[c] > 0) {
+      // outward part: hidden if every sample point just outside it is inside other material
+      const area = faces.map((f) => [f, faceNormalInto(mesh.V, mesh.F, f, n)]).sort((p, q) => q[1] - p[1]);
+      const step = Math.max(1, Math.floor(area.length / 12));
+      let all = true, tested = 0;
+      for (let i = 0; i < area.length && tested < 12; i += step) {
+        const f = area[i][0]; if (!(area[i][1] > 0)) continue; tested++;
+        faceNormalInto(mesh.V, mesh.F, f, n);
+        const a = mesh.F[f * 3] * 3, b = mesh.F[f * 3 + 1] * 3, cc = mesh.F[f * 3 + 2] * 3;
+        const x = (mesh.V[a] + mesh.V[b] + mesh.V[cc]) / 3 + off * n[0], y = (mesh.V[a + 1] + mesh.V[b + 1] + mesh.V[cc + 1]) / 3 + off * n[1], z = (mesh.V[a + 2] + mesh.V[b + 2] + mesh.V[cc + 2]) / 3 + off * n[2];
+        if (W.at(x, y, z) < 1) { all = false; break; }
+      }
+      if (all && tested) { remove[c] = 1; parts++; }
+    } else if (shellOf) {
+      const src = new Set(); let unknown = 0; for (const f of faces) { const s = shellOf(f); if (s >= 0) src.add(s); else unknown++; }
+      if (api._voidDbg) api._voidDbg.push({ faces: faces.length, vol: co.vol[c] / 6, sources: [...src], unknown });
+      if (src.size >= 2 || (src.size === 1 && wasCavity && !wasCavity([...src][0]))) { remove[c] = 1; voids++; }
+    }
+  }
+  return { remove, comps, parts, voids };
 }
 
 /* ----------------------------------------------------------------- solidify */
@@ -1821,6 +3030,258 @@ function solidify(mesh, resolution, prog) {
   return { mesh: out, resolution: N, voxel: h, dims };
 }
 
+/* ------------------------------------------------------------- fill hollows
+   Fill every empty space that can only be reached from outside through openings narrower than 2 * radius
+   (the hollow grip around a magazine, gaps between assembled parts, sealed pockets). A ball of that radius rolled
+   around the outside marks the space it can reach; everything else that is empty becomes solid. The filling is
+   built as a voxel solid that overlaps the model by one voxel, and is then merged exactly with it, so every
+   surface that is not filled keeps its original triangles. */
+function voxelSolid(V, F, nf, dead, org, h, dims) {
+  const [nx, ny, nz] = dims, solid = new Uint8Array(nx * ny * nz);
+  const lines = new Map();
+  for (let f = 0; f < nf; f++) {
+    if (dead && dead[f]) continue;
+    const a = F[f * 3] * 3, b = F[f * 3 + 1] * 3, c = F[f * 3 + 2] * 3;
+    const x0 = Math.min(V[a], V[b], V[c]), x1 = Math.max(V[a], V[b], V[c]), y0 = Math.min(V[a + 1], V[b + 1], V[c + 1]), y1 = Math.max(V[a + 1], V[b + 1], V[c + 1]);
+    const i0 = Math.max(0, Math.ceil((x0 - org[0]) / h - 0.5)), i1 = Math.min(nx - 1, Math.floor((x1 - org[0]) / h - 0.5));
+    const j0 = Math.max(0, Math.ceil((y0 - org[1]) / h - 0.5)), j1 = Math.min(ny - 1, Math.floor((y1 - org[1]) / h - 0.5));
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const X = org[0] + (i + 0.5) * h + 1.3e-7 * h, Y = org[1] + (j + 0.5) * h + 2.7e-7 * h;
+      const ax = V[a] - X, ay = V[a + 1] - Y, bx = V[b] - X, by = V[b + 1] - Y, cx = V[c] - X, cy = V[c + 1] - Y;
+      const d1 = ax * by - ay * bx, d2 = bx * cy - by * cx, d3 = cx * ay - cy * ax;
+      if (!((d1 > 0 && d2 > 0 && d3 > 0) || (d1 < 0 && d2 < 0 && d3 < 0))) continue;
+      const tot = d1 + d2 + d3, z = (V[a + 2] * d2 + V[b + 2] * d3 + V[c + 2] * d1) / tot;
+      const key = i * ny + j; let l = lines.get(key); if (!l) lines.set(key, l = []); l.push(z, tot > 0 ? 1 : -1);
+    }
+  }
+  for (const [key, l] of lines) {
+    const n = l.length / 2, ord = Array.from({ length: n }, (_, i) => i).sort((p, q) => l[p * 2] - l[q * 2]);
+    const i = Math.floor(key / ny), j = key % ny; let w = 0; for (let q = 0; q < n; q++) w += l[q * 2 + 1];
+    let q = 0;
+    for (let k = 0; k < nz; k++) {
+      const Z = org[2] + (k + 0.5) * h;
+      while (q < n && l[ord[q] * 2] < Z) { w -= l[ord[q] * 2 + 1]; q++; }
+      if (w >= 1) solid[(i * ny + j) * nz + k] = 1;
+    }
+  }
+  return solid;
+}
+// squared Euclidean distance transform (Felzenszwalb-Huttenlocher), in voxel units, to the voxels where src is set
+function edt(src, dims) {
+  const [nx, ny, nz] = dims, INF = 1e20, D = new Float32Array(nx * ny * nz);
+  for (let i = 0; i < D.length; i++) D[i] = src[i] ? 0 : INF;
+  const n = Math.max(nx, ny, nz), f = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  const pass = (len, get, set) => {
+    for (let q = 0; q < len; q++) f[q] = get(q);
+    let k = 0; v[0] = 0; z[0] = -INF; z[1] = INF;
+    for (let q = 1; q < len; q++) {
+      let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      k++; v[k] = q; z[k] = s; z[k + 1] = INF;
+    }
+    k = 0;
+    for (let q = 0; q < len; q++) { while (z[k + 1] < q) k++; const r = q - v[k]; d[q] = r * r + f[v[k]]; }
+    for (let q = 0; q < len; q++) set(q, d[q]);
+  };
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) { const b = (i * ny + j) * nz; pass(nz, (q) => D[b + q], (q, x) => { D[b + q] = x; }); }
+  for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) { const b = i * ny * nz + k; pass(ny, (q) => D[b + q * nz], (q, x) => { D[b + q * nz] = x; }); }
+  for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) { const b = j * nz + k; pass(nx, (q) => D[b + q * ny * nz], (q, x) => { D[b + q * ny * nz] = x; }); }
+  return D;
+}
+/* Ray caster over the faces of a mesh (bounding volume hierarchy, median splits). hit(o, d, tmax, skip, tmin) returns
+   the distance (beyond tmin) to the nearest face the ray from o along the unit vector d crosses, ignoring face skip,
+   or tmax / Infinity when there is none. */
+function rayCaster(V, F, nf, dead) {
+  const ids = []; for (let f = 0; f < nf; f++) if (!dead || !dead[f]) ids.push(f);
+  const n = ids.length, order = Int32Array.from(ids), cen = new Float64Array(nf * 3), fb = new Float64Array(nf * 6);
+  for (const f of ids) {
+    for (let k = 0; k < 3; k++) { const a = V[F[f * 3] * 3 + k], b = V[F[f * 3 + 1] * 3 + k], c = V[F[f * 3 + 2] * 3 + k]; fb[f * 6 + k] = Math.min(a, b, c); fb[f * 6 + 3 + k] = Math.max(a, b, c); cen[f * 3 + k] = (a + b + c) / 3; }
+  }
+  const nb = [], nl = [], nr = [];   // node boxes (6 per node), left child or -1-start, right child or count
+  const build = (lo, hi) => {
+    const id = nl.length; nl.push(0); nr.push(0); const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    for (let i = lo; i < hi; i++) { const f = order[i]; for (let k = 0; k < 3; k++) { if (fb[f * 6 + k] < box[k]) box[k] = fb[f * 6 + k]; if (fb[f * 6 + 3 + k] > box[3 + k]) box[3 + k] = fb[f * 6 + 3 + k]; } }
+    nb.push(...box);
+    if (hi - lo <= 4) { nl[id] = -1 - lo; nr[id] = hi - lo; return id; }
+    let ax = 0; const ext = [box[3] - box[0], box[4] - box[1], box[5] - box[2]]; if (ext[1] > ext[ax]) ax = 1; if (ext[2] > ext[ax]) ax = 2;
+    const sub = Array.from(order.subarray(lo, hi)).sort((p, q) => cen[p * 3 + ax] - cen[q * 3 + ax]); order.set(sub, lo);
+    const mid = (lo + hi) >> 1;
+    const l = build(lo, mid), r = build(mid, hi); nl[id] = l; nr[id] = r; return id;
+  };
+  if (n) build(0, n);
+  const B = Float64Array.from(nb), L = Int32Array.from(nl), Rr = Int32Array.from(nr), stack = new Int32Array(128);
+  const hit = (ox, oy, oz, dx, dy, dz, tmax, skip, tmin) => {
+    const lo = tmin > 0 ? tmin : 0;
+    if (!n) return Infinity;
+    let best = tmax === undefined ? Infinity : tmax, bestF = -1, sp = 0; stack[sp++] = 0;
+    const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+    while (sp) {
+      const nd = stack[--sp], o = nd * 6;
+      let t0 = ((ix >= 0 ? B[o] : B[o + 3]) - ox) * ix, t1 = ((ix >= 0 ? B[o + 3] : B[o]) - ox) * ix;
+      const ty0 = ((iy >= 0 ? B[o + 1] : B[o + 4]) - oy) * iy, ty1 = ((iy >= 0 ? B[o + 4] : B[o + 1]) - oy) * iy;
+      if (ty0 > t0) t0 = ty0; if (ty1 < t1) t1 = ty1;
+      const tz0 = ((iz >= 0 ? B[o + 2] : B[o + 5]) - oz) * iz, tz1 = ((iz >= 0 ? B[o + 5] : B[o + 2]) - oz) * iz;
+      if (tz0 > t0) t0 = tz0; if (tz1 < t1) t1 = tz1;
+      if (!(t0 <= t1) || t1 < 0 || t0 > best) continue;
+      if (L[nd] < 0) {
+        for (let i = -1 - L[nd], e = i + Rr[nd]; i < e; i++) {
+          const f = order[i]; if (f === skip) continue;
+          const a = F[f * 3] * 3, b = F[f * 3 + 1] * 3, c = F[f * 3 + 2] * 3;
+          const e1x = V[b] - V[a], e1y = V[b + 1] - V[a + 1], e1z = V[b + 2] - V[a + 2], e2x = V[c] - V[a], e2y = V[c + 1] - V[a + 1], e2z = V[c + 2] - V[a + 2];
+          const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x, det = e1x * px + e1y * py + e1z * pz;
+          if (det === 0) continue;
+          const inv = 1 / det, sx = ox - V[a], sy = oy - V[a + 1], sz = oz - V[a + 2], u = (sx * px + sy * py + sz * pz) * inv;
+          if (u < 0 || u > 1) continue;
+          const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x, v = (dx * qx + dy * qy + dz * qz) * inv;
+          if (v < 0 || u + v > 1) continue;
+          const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+          if (t > lo && t < best) { best = t; bestF = f; }
+        }
+      } else { stack[sp++] = L[nd]; stack[sp++] = Rr[nd]; }
+    }
+    api_.face = bestF;
+    return best;
+  };
+  const api_ = { hit, face: -1 };   // face: the face the last hit() found (-1 for none)
+  return api_;
+}
+// rotation by angle a (radians) about axis n, row-major 3x3
+function rotationMatrix(n, a) {
+  const l = Math.hypot(n[0], n[1], n[2]), x = n[0] / l, y = n[1] / l, z = n[2] / l, c = Math.cos(a), s = Math.sin(a), t = 1 - c;
+  return [t * x * x + c, t * x * y - s * z, t * x * z + s * y, t * x * y + s * z, t * y * y + c, t * y * z - s * x, t * x * z - s * y, t * y * z + s * x, t * z * z + c];
+}
+/* returns { soup, count, volume, hollows } : the filling as a triangle soup (to be merged with the model) */
+function hollowFill(mesh, radius, voxel, variant) {
+  // the voxel lattice is turned a few degrees against the model axes, so no face of the filling lies in (or a hair
+  // away from) the plane of a flat model face; flat faces are usually axis-aligned. Variants turn it differently.
+  const turns = [[[0.57, 0.71, 0.41], 0.13], [[-0.33, 0.52, 0.79], 0.11], [[0.68, -0.25, 0.69], 0.15]];
+  const tv = turns[(variant | 0) % turns.length];
+  const Q = rotationMatrix(tv[0], tv[1]);
+  const VR = new Float64Array(mesh.nv * 3);
+  for (let v = 0; v < mesh.nv; v++) { const x = mesh.V[v * 3], y = mesh.V[v * 3 + 1], z = mesh.V[v * 3 + 2]; for (let r = 0; r < 3; r++) VR[v * 3 + r] = Q[r * 3] * x + Q[r * 3 + 1] * y + Q[r * 3 + 2] * z; }
+  const bb = bbox(VR, mesh.nv);
+  const h = voxel, R = radius / h;                       // radius in voxels
+  const pad = Math.ceil(R) + 3;
+  const shift = [[0.2371, 0.3119, 0.1731], [0.4127, 0.1583, 0.3361], [0.0917, 0.4453, 0.2647]][(variant | 0) % 3];
+  const org = [0, 1, 2].map((k) => bb.min[k] - (pad + shift[k]) * h), dims = [0, 1, 2].map((k) => Math.ceil(bb.size[k] / h) + 2 * pad + 2);
+  const [nx, ny, nz] = dims, N = nx * ny * nz;
+  const solid = voxelSolid(VR, mesh.F, mesh.nf, mesh.dead, org, h, dims);
+  // ball centres: empty voxels at least R away from the solid, connected to the grid border
+  const D = edt(solid, dims), R2 = R * R;
+  const reach = new Uint8Array(N), queue = new Int32Array(N); let qn = 0;
+  const push = (v) => { if (!reach[v] && D[v] >= R2) { reach[v] = 1; queue[qn++] = v; } };
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) if (i === 0 || j === 0 || k === 0 || i === nx - 1 || j === ny - 1 || k === nz - 1) push((i * ny + j) * nz + k);
+  for (let qi = 0; qi < qn; qi++) {
+    const v = queue[qi], k = v % nz, j = ((v / nz) | 0) % ny, i = (v / (ny * nz)) | 0;
+    if (i > 0) push(v - ny * nz); if (i < nx - 1) push(v + ny * nz); if (j > 0) push(v - nz); if (j < ny - 1) push(v + nz); if (k > 0) push(v - 1); if (k < nz - 1) push(v + 1);
+  }
+  // space the ball reaches: within R of a reachable centre
+  const Dc = edt(reach, dims);
+  const fill = new Uint8Array(N); let filled = 0;
+  for (let v = 0; v < N; v++) if (!solid[v] && Dc[v] > R2) { fill[v] = 1; filled++; }
+  if (!filled) return null;
+  // group into hollows and drop specks (a few voxels in a crevice)
+  const comp = new Int32Array(N).fill(-1), sizes = []; let nc = 0;
+  for (let s = 0; s < N; s++) {
+    if (!fill[s] || comp[s] >= 0) continue;
+    let head = 0, tail = 0; queue[tail++] = s; comp[s] = nc;
+    while (head < tail) {
+      const v = queue[head++], k = v % nz, j = ((v / nz) | 0) % ny, i = (v / (ny * nz)) | 0;
+      for (const u of [i > 0 ? v - ny * nz : -1, i < nx - 1 ? v + ny * nz : -1, j > 0 ? v - nz : -1, j < ny - 1 ? v + nz : -1, k > 0 ? v - 1 : -1, k < nz - 1 ? v + 1 : -1]) {
+        if (u >= 0 && fill[u] && comp[u] < 0) { comp[u] = nc; queue[tail++] = u; }
+      }
+    }
+    sizes.push(tail); nc++;
+  }
+  // how deep each hollow reaches in from its opening (voxel steps from a fill voxel next to space the ball reaches);
+  // shallow ones are surface detail (grooves, engraving, serrations) and stay open
+  const dist = new Int32Array(N).fill(-1); let qh = 0, qt = 0;
+  const open = (u) => !solid[u] && !fill[u];
+  for (let v = 0; v < N; v++) {
+    if (!fill[v]) continue;
+    const k = v % nz, j = ((v / nz) | 0) % ny, i = (v / (ny * nz)) | 0;
+    if ((i > 0 && open(v - ny * nz)) || (i < nx - 1 && open(v + ny * nz)) || (j > 0 && open(v - nz)) || (j < ny - 1 && open(v + nz)) || (k > 0 && open(v - 1)) || (k < nz - 1 && open(v + 1))) { dist[v] = 0; queue[qt++] = v; }
+  }
+  while (qh < qt) {
+    const v = queue[qh++], k = v % nz, j = ((v / nz) | 0) % ny, i = (v / (ny * nz)) | 0, d = dist[v] + 1;
+    for (const u of [i > 0 ? v - ny * nz : -1, i < nx - 1 ? v + ny * nz : -1, j > 0 ? v - nz : -1, j < ny - 1 ? v + nz : -1, k > 0 ? v - 1 : -1, k < nz - 1 ? v + 1 : -1]) {
+      if (u >= 0 && fill[u] && dist[u] < 0) { dist[u] = d; queue[qt++] = u; }
+    }
+  }
+  const depth = new Int32Array(nc).fill(-1);             // -1: no opening at this voxel size
+  for (let v = 0; v < N; v++) if (fill[v] && dist[v] > depth[comp[v]]) depth[comp[v]] = dist[v];
+  const minVox = Math.max(8, Math.round(R * R * R)), minDepth = Math.max(6, Math.ceil(4 * R));
+  let hollows = 0, vol = 0;
+  const keep = new Uint8Array(nc);
+  for (let c = 0; c < nc; c++) if (sizes[c] >= minVox && (depth[c] < 0 || depth[c] >= minDepth)) { keep[c] = 1; hollows++; vol += sizes[c]; }
+  if (!hollows) return null;
+  if (api._hollowDbg) Object.assign(api._hollowDbg, { Dc, R2, Q, org, h, dims, comp, dist, keep, depth, sizes, solid, fill });
+  // every kept hollow is filled whole (sealing only its opening is not enough: a slit thinner than a voxel would
+  // leave it open). The filling overlaps the model by two voxels so the exact merge meets solid material, not a
+  // touching face, and hairline gaps next to the hollow are covered too.
+  const inside = new Uint8Array(N);
+  for (let v = 0; v < N; v++) if (fill[v] && keep[comp[v]]) inside[v] = 1;
+  let grown = inside;
+  for (let layer = 0; layer < 2; layer++) {
+    const next = grown.slice();
+    for (let v = 0; v < N; v++) {
+      if (!grown[v]) continue;
+      const k = v % nz, j = ((v / nz) | 0) % ny, i = (v / (ny * nz)) | 0;
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (let dk = -1; dk <= 1; dk++) {
+        const a2 = i + di, b2 = j + dj, c2 = k + dk; if (a2 < 0 || b2 < 0 || c2 < 0 || a2 >= nx || b2 >= ny || c2 >= nz) continue;
+        const u = (a2 * ny + b2) * nz + c2; if (solid[u]) next[u] = 1;
+      }
+    }
+    grown = next;
+  }
+  // the boundary of the voxels, made a 2-manifold first: no two voxels may touch only along an edge or at a
+  // corner (inside or outside), so every edge of the surface has two faces and every vertex one fan
+  const blockBad = new Uint8Array(256);
+  for (let mask = 0; mask < 256; mask++) {
+    const parts = (want) => { let seen = 0, n = 0; for (let s0 = 0; s0 < 8; s0++) { if (((mask >> s0) & 1) !== want || (seen >> s0) & 1) continue; n++; const st = [s0]; seen |= 1 << s0; while (st.length) { const x = st.pop(); for (const bit of [1, 2, 4]) { const y = x ^ bit; if (((mask >> y) & 1) === want && !((seen >> y) & 1)) { seen |= 1 << y; st.push(y); } } } } return n; };
+    blockBad[mask] = parts(1) > 1 || parts(0) > 1 ? 1 : 0;
+  }
+  const sx = ny * nz, sy = nz;
+  for (let round = 0; round < 50; round++) {
+    let changed = 0;
+    for (let i = 0; i < nx - 1; i++) for (let j = 0; j < ny - 1; j++) for (let k = 0; k < nz - 1; k++) {
+      const v = (i * ny + j) * nz + k;
+      let mask = 0; for (let t = 0; t < 8; t++) if (grown[v + (t & 1 ? sx : 0) + (t & 2 ? sy : 0) + (t & 4 ? 1 : 0)]) mask |= 1 << t;
+      if (!blockBad[mask]) continue;
+      for (let t = 0; t < 8; t++) grown[v + (t & 1 ? sx : 0) + (t & 2 ? sy : 0) + (t & 4 ? 1 : 0)] = 1;
+      changed++;
+    }
+    if (!changed) break;
+  }
+  // close pockets the voxels enclose (after the fix no pocket touches the outside at an edge or corner), so the
+  // filling has no cavities
+  {
+    const outside = new Uint8Array(N); let qh2 = 0, qt2 = 0;
+    const seedOut = (v) => { if (!grown[v] && !outside[v]) { outside[v] = 1; queue[qt2++] = v; } };
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) if (i === 0 || j === 0 || k === 0 || i === nx - 1 || j === ny - 1 || k === nz - 1) seedOut((i * ny + j) * nz + k);
+    while (qh2 < qt2) {
+      const v = queue[qh2++], k = v % nz, j = ((v / nz) | 0) % ny, i = (v / (ny * nz)) | 0;
+      if (i > 0) seedOut(v - ny * nz); if (i < nx - 1) seedOut(v + ny * nz); if (j > 0) seedOut(v - nz); if (j < ny - 1) seedOut(v + nz); if (k > 0) seedOut(v - 1); if (k < nz - 1) seedOut(v + 1);
+    }
+    for (let v = 0; v < N; v++) if (!outside[v]) grown[v] = 1;
+  }
+  const verts = [], tris = [], vmap = new Map();
+  const vid = (i, j, k) => { const key = (i * (ny + 1) + j) * (nz + 1) + k; let id = vmap.get(key); if (id === undefined) { id = verts.length / 3; vmap.set(key, id); const x = org[0] + i * h, y = org[1] + j * h, z = org[2] + k * h; verts.push(Q[0] * x + Q[3] * y + Q[6] * z, Q[1] * x + Q[4] * y + Q[7] * z, Q[2] * x + Q[5] * y + Q[8] * z); } return id; };
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) {
+    const v = (i * ny + j) * nz + k; if (!grown[v]) continue;
+    // corners of the voxel [i,i+1]x[j,j+1]x[k,k+1]; each face wound counter-clockwise seen from outside
+    if (i === 0 || !grown[v - sx]) { const a0 = vid(i, j, k), a1 = vid(i, j, k + 1), a2 = vid(i, j + 1, k + 1), a3 = vid(i, j + 1, k); tris.push(a0, a1, a2, a0, a2, a3); }
+    if (i === nx - 1 || !grown[v + sx]) { const a0 = vid(i + 1, j, k), a1 = vid(i + 1, j + 1, k), a2 = vid(i + 1, j + 1, k + 1), a3 = vid(i + 1, j, k + 1); tris.push(a0, a1, a2, a0, a2, a3); }
+    if (j === 0 || !grown[v - sy]) { const a0 = vid(i, j, k), a1 = vid(i + 1, j, k), a2 = vid(i + 1, j, k + 1), a3 = vid(i, j, k + 1); tris.push(a0, a1, a2, a0, a2, a3); }
+    if (j === ny - 1 || !grown[v + sy]) { const a0 = vid(i, j + 1, k), a1 = vid(i, j + 1, k + 1), a2 = vid(i + 1, j + 1, k + 1), a3 = vid(i + 1, j + 1, k); tris.push(a0, a1, a2, a0, a2, a3); }
+    if (k === 0 || !grown[v - 1]) { const a0 = vid(i, j, k), a1 = vid(i, j + 1, k), a2 = vid(i + 1, j + 1, k), a3 = vid(i + 1, j, k); tris.push(a0, a1, a2, a0, a2, a3); }
+    if (k === nz - 1 || !grown[v + 1]) { const a0 = vid(i, j, k + 1), a1 = vid(i + 1, j, k + 1), a2 = vid(i + 1, j + 1, k + 1), a3 = vid(i, j + 1, k + 1); tris.push(a0, a1, a2, a0, a2, a3); }
+  }
+  const soup = new Float32Array(tris.length * 3);
+  for (let t = 0; t < tris.length; t++) { const v = tris[t]; soup[t * 3] = verts[v * 3]; soup[t * 3 + 1] = verts[v * 3 + 1]; soup[t * 3 + 2] = verts[v * 3 + 2]; }
+  return { soup, count: tris.length / 3, volume: vol * h * h * h, hollows };
+}
+
 /* ------------------------------------------------------------------ export */
 function exportBinarySTL(V, F, nf, name) {
   const buf = new ArrayBuffer(84 + nf * 50); const dv = new DataView(buf); const u8 = new Uint8Array(buf);
@@ -1922,7 +3383,7 @@ const synth = (() => {
 
 var api; api = { parseSTL, weldExact, buildTopology, analyze, repair, exportBinarySTL, exportAsciiSTL, makeZip, synth, DEFAULTS, FLAG_FLIPPED, FLAG_FILL, FLAG_SPLIT, fmtInt, Mesh, bbox,
   _boundaryLoops: boundaryLoops, _loopGeometry: loopGeometry, _classifyDegenerate: classifyDegenerate, _faceComponents: faceComponents, _orientationFlips: orientationFlips,
-  findSelfIntersections, solidify, removeSlivers, _fixTJunctions: fixTJunctions, _fillHoles: fillHoles, _componentOrientation: componentOrientation };
+  findSelfIntersections, solidify, removeSlivers, mergeShells, windingIndex, hiddenShells, triTriIntersect, hollowFill, rayCaster, _fixTJunctions: fixTJunctions, _fillHoles: fillHoles, _componentOrientation: componentOrientation };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 return api;
 })();
